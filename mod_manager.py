@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator
 
+import dependencies
 from config import Config
 
 TRACKED_EXTENSIONS = {".package", ".ts4script"}
@@ -248,6 +249,7 @@ def _deactivate(mod_id: str, config: Config) -> None:
 
 def enable(mod_id: str, *, config: Config, conn: sqlite3.Connection) -> None:
     _get_mod(conn, mod_id)
+    dependencies.check_required(mod_id, conn)
     _activate(mod_id, config)
     conn.execute("UPDATE mods SET active = 1 WHERE id = ?", (mod_id,))
     conn.commit()

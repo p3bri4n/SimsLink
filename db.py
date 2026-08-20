@@ -93,6 +93,16 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE mod_files ADD COLUMN mtime REAL;
         """,
     ),
+    (
+        3,
+        """
+        -- dependencies.depends_on_curseforge_id alone can't express a link
+        -- between two locally-installed mods when neither has a known
+        -- curseforge_id yet (the normal case in Assisted Mode, since there's
+        -- no API to populate it) — add a local-id alternative.
+        ALTER TABLE dependencies ADD COLUMN depends_on_mod_id TEXT REFERENCES mods(id) ON DELETE SET NULL;
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

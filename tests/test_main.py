@@ -15,6 +15,7 @@ from typing import Any
 import flet as ft
 import pytest
 
+import config
 import main
 
 
@@ -76,7 +77,7 @@ def _set_env(monkeypatch, tmp_path) -> dict[str, Path]:
 
 
 @pytest.fixture(autouse=True)
-def _clean_env(monkeypatch):
+def _clean_env(monkeypatch, tmp_path):
     for var in (
         "SIMS4_GAME_DIR",
         "SIMS4_MODS_DIR",
@@ -87,10 +88,13 @@ def _clean_env(monkeypatch):
         "GAME_VERSION",
     ):
         monkeypatch.delenv(var, raising=False)
+    # config.DEFAULT_ENV_PATH is resolved next to config.py (the real project
+    # root) precisely so it doesn't depend on cwd — which means these tests
+    # must not depend on whatever .env happens to exist there either.
+    monkeypatch.setattr(config, "DEFAULT_ENV_PATH", tmp_path / ".env-not-created")
 
 
-def test_main_shows_config_error_when_env_missing(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)  # no .env here either
+def test_main_shows_config_error_when_env_missing():
     page = FakePage()
 
     main.main(page)
@@ -99,8 +103,7 @@ def test_main_shows_config_error_when_env_missing(monkeypatch, tmp_path):
 
 
 def test_main_shows_assisted_mode_banner_with_no_api_key(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    dirs = _set_env(monkeypatch, tmp_path)
+    _set_env(monkeypatch, tmp_path)
     page = FakePage()
 
     main.main(page)
@@ -113,7 +116,6 @@ def test_main_shows_assisted_mode_banner_with_no_api_key(monkeypatch, tmp_path):
 
 
 def test_main_download_detection_matches_on_page_thread_not_watcher_thread(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
     dirs = _set_env(monkeypatch, tmp_path)
     page = FakePage()
 
