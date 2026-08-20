@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "simslink"
+version = "0.1.0"
+description = "Desktop mod manager for The Sims 4 on Linux, with automated crash diagnosis"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "flet>=0.24",
+    "watchdog>=4.0",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+]
+
+[project.scripts]
+simslink = "main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = ["*.py", "ui/*.py", "i18n/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

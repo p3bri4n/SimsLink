@@ -1,0 +1,10 @@
+{
+  "app.title": "SimsLink",
+  "mode.direct_banner": "Mode Direct — connecté à CurseForge",
+  "mode.assisted_banner": "Mode Assisté — installation via navigateur",
+  "nav.library": "Bibliothèque",
+  "nav.catalog": "Catalogue",
+  "nav.updates": "Mises à jour",
+  "nav.crash_mode": "Mode Crash",
+  "nav.settings": "Paramètres"
+}

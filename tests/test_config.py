@@ -1,0 +1,113 @@
+from pathlib import Path
+
+import pytest
+
+from config import Config, ConfigError, DEFAULT_DOWNLOAD_WATCH_DIR, detect_symlink_support
+
+ALL_ENV_VARS = (
+    "SIMS4_GAME_DIR",
+    "SIMS4_MODS_DIR",
+    "SIMS4_USER_DIR",
+    "LIBRARY_DIR",
+    "CURSEFORGE_API_KEY",
+    "DOWNLOAD_WATCH_DIR",
+    "GAME_VERSION",
+)
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    for var in ALL_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+
+def write_env_file(tmp_path: Path, **overrides: str) -> Path:
+    values = {
+        "SIMS4_GAME_DIR": "/games/sims4",
+        "SIMS4_MODS_DIR": "/home/user/Documents/Electronic Arts/The Sims 4/Mods",
+        "SIMS4_USER_DIR": "/home/user/Documents/Electronic Arts/The Sims 4",
+        "LIBRARY_DIR": "/home/user/simslink-library",
+        **overrides,
+    }
+    env_path = tmp_path / ".env"
+    env_path.write_text("\n".join(f"{k}={v}" for k, v in values.items()))
+    return env_path
+
+
+def test_from_env_missing_required_raises(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text("SIMS4_GAME_DIR=/games/sims4\n")
+
+    with pytest.raises(ConfigError) as exc_info:
+        Config.from_env(env_path)
+
+    message = str(exc_info.value)
+    assert "SIMS4_MODS_DIR" in message
+    assert "SIMS4_USER_DIR" in message
+    assert "LIBRARY_DIR" in message
+    assert "SIMS4_GAME_DIR" not in message
+
+
+def test_from_env_loads_required_values(tmp_path):
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.sims4_game_dir == Path("/games/sims4")
+    assert config.library_dir == Path("/home/user/simslink-library")
+    assert config.curseforge_api_key is None
+    assert config.has_api_key is False
+
+
+def test_from_env_download_watch_dir_defaults_when_unset(tmp_path):
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.download_watch_dir == DEFAULT_DOWNLOAD_WATCH_DIR
+
+
+def test_from_env_download_watch_dir_uses_explicit_value(tmp_path):
+    env_path = write_env_file(tmp_path, DOWNLOAD_WATCH_DIR="/home/user/mydownloads")
+
+    config = Config.from_env(env_path)
+
+    assert config.download_watch_dir == Path("/home/user/mydownloads")
+
+
+def test_has_api_key_true_for_non_blank_value(tmp_path):
+    env_path = write_env_file(tmp_path, CURSEFORGE_API_KEY="a-real-key")
+
+    config = Config.from_env(env_path)
+
+    assert config.has_api_key is True
+
+
+def test_has_api_key_false_for_whitespace_only_value(tmp_path):
+    env_path = write_env_file(tmp_path, CURSEFORGE_API_KEY="   ")
+
+    config = Config.from_env(env_path)
+
+    assert config.has_api_key is False
+
+
+def test_real_env_var_overrides_dotenv_file(tmp_path, monkeypatch):
+    env_path = write_env_file(tmp_path, LIBRARY_DIR="/from/dotenv")
+    monkeypatch.setenv("LIBRARY_DIR", "/from/real/environment")
+
+    config = Config.from_env(env_path)
+
+    assert config.library_dir == Path("/from/real/environment")
+
+
+def test_detect_symlink_support_true_on_normal_filesystem(tmp_path):
+    assert detect_symlink_support(tmp_path) is True
+
+
+def test_detect_symlink_support_false_when_symlink_raises(tmp_path, monkeypatch):
+    def raise_oserror(self, target):
+        raise OSError("symlinks not supported")
+
+    monkeypatch.setattr(Path, "symlink_to", raise_oserror)
+
+    assert detect_symlink_support(tmp_path) is False
