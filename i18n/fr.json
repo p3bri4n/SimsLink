@@ -1,10 +1,48 @@
 {
   "app.title": "SimsLink",
+  "app.config_error": "Erreur de configuration : {message}",
+
   "mode.direct_banner": "Mode Direct — connecté à CurseForge",
   "mode.assisted_banner": "Mode Assisté — installation via navigateur",
+
   "nav.library": "Bibliothèque",
   "nav.catalog": "Catalogue",
   "nav.updates": "Mises à jour",
   "nav.crash_mode": "Mode Crash",
-  "nav.settings": "Paramètres"
+  "nav.settings": "Paramètres",
+
+  "library.empty": "Aucun mod installé pour l'instant.",
+  "library.toggle_tooltip": "Actif",
+  "library.details_tooltip": "Détails",
+  "library.delete_tooltip": "Supprimer",
+  "library.unknown": "Inconnu",
+  "library.detail.author": "Auteur : {value}",
+  "library.detail.category": "Catégorie : {value}",
+  "library.detail.installed_version": "Version installée : {value}",
+  "library.detail.compatibility": "Compatibilité : {value}",
+  "library.detail.files_heading": "Fichiers :",
+  "library.detail.no_description": "Aucune description.",
+  "library.detail.close": "Fermer",
+  "library.delete_confirm.title": "Supprimer ce mod ?",
+  "library.delete_confirm.message": "Ceci retire '{name}' de la bibliothèque définitivement.",
+  "library.delete_confirm.cancel": "Annuler",
+  "library.delete_confirm.confirm": "Supprimer",
+
+  "settings.folders_heading": "Dossiers",
+  "settings.folder.game_dir": "Dossier du jeu",
+  "settings.folder.mods_dir": "Dossier Mods",
+  "settings.folder.user_dir": "Dossier utilisateur Sims 4",
+  "settings.folder.library_dir": "Dossier bibliothèque",
+  "settings.folder.download_watch_dir": "Dossier de téléchargement surveillé",
+  "settings.language_heading": "Langue",
+  "settings.language.system": "Système",
+  "settings.language.english": "English",
+  "settings.language.french": "Français",
+
+  "download.detected_title": "Nouveau téléchargement détecté",
+  "download.detected_message": "Fichier détecté : {filename}. Installer ce mod ?",
+  "download.detected_replace_message": "Fichier détecté : {filename}. Cela ressemble à une mise à jour de '{mod_name}'. Remplacer ?",
+  "download.install_button": "Installer",
+  "download.replace_button": "Remplacer",
+  "download.dismiss_button": "Ignorer"
 }

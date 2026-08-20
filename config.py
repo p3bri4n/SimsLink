@@ -19,6 +19,10 @@ REQUIRED_VARS = (
 
 DEFAULT_DOWNLOAD_WATCH_DIR = Path.home() / "Downloads"
 
+# The SQLite DB isn't user-configurable — it's app state, not a mod library
+# concern — so it lives in the standard XDG data location, not LIBRARY_DIR.
+DEFAULT_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "simslink"
+
 
 class ConfigError(Exception):
     """Raised when required configuration is missing or invalid."""
@@ -42,6 +46,10 @@ class Config:
     @functools.cached_property
     def symlink_support(self) -> bool:
         return detect_symlink_support(self.library_dir)
+
+    @property
+    def db_path(self) -> Path:
+        return DEFAULT_DATA_DIR / "simslink.sqlite3"
 
     @classmethod
     def from_env(cls, env_path: Path | None = None) -> Config:

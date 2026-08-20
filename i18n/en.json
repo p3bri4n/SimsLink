@@ -1,10 +1,48 @@
 {
   "app.title": "SimsLink",
+  "app.config_error": "Configuration error: {message}",
+
   "mode.direct_banner": "Direct Mode — connected to CurseForge",
   "mode.assisted_banner": "Assisted Mode — browser-based install",
+
   "nav.library": "Library",
   "nav.catalog": "Catalog",
   "nav.updates": "Updates",
   "nav.crash_mode": "Crash Mode",
-  "nav.settings": "Settings"
+  "nav.settings": "Settings",
+
+  "library.empty": "No mods installed yet.",
+  "library.toggle_tooltip": "Active",
+  "library.details_tooltip": "Details",
+  "library.delete_tooltip": "Delete",
+  "library.unknown": "Unknown",
+  "library.detail.author": "Author: {value}",
+  "library.detail.category": "Category: {value}",
+  "library.detail.installed_version": "Installed version: {value}",
+  "library.detail.compatibility": "Compatibility: {value}",
+  "library.detail.files_heading": "Files:",
+  "library.detail.no_description": "No description.",
+  "library.detail.close": "Close",
+  "library.delete_confirm.title": "Delete mod?",
+  "library.delete_confirm.message": "This removes '{name}' from the library permanently.",
+  "library.delete_confirm.cancel": "Cancel",
+  "library.delete_confirm.confirm": "Delete",
+
+  "settings.folders_heading": "Folders",
+  "settings.folder.game_dir": "Game directory",
+  "settings.folder.mods_dir": "Mods directory",
+  "settings.folder.user_dir": "Sims 4 user directory",
+  "settings.folder.library_dir": "Library directory",
+  "settings.folder.download_watch_dir": "Download watch directory",
+  "settings.language_heading": "Language",
+  "settings.language.system": "System",
+  "settings.language.english": "English",
+  "settings.language.french": "Français",
+
+  "download.detected_title": "New download detected",
+  "download.detected_message": "New file detected: {filename}. Install this mod?",
+  "download.detected_replace_message": "New file detected: {filename}. This looks like an update for '{mod_name}'. Replace it?",
+  "download.install_button": "Install",
+  "download.replace_button": "Replace",
+  "download.dismiss_button": "Dismiss"
 }

@@ -58,8 +58,12 @@ def walk_mod_files(root: Path) -> list[ModFile]:
     return files
 
 
+def slugify(text: str) -> str:
+    return _SLUG_RE.sub("-", text.lower()).strip("-") or "mod"
+
+
 def generate_unique_mod_id(hint: str, conn: sqlite3.Connection) -> str:
-    base = _SLUG_RE.sub("-", hint.lower()).strip("-") or "mod"
+    base = slugify(hint)
     candidate = base
     suffix = 2
     while conn.execute("SELECT 1 FROM mods WHERE id = ?", (candidate,)).fetchone():
