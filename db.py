@@ -84,6 +84,15 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        2,
+        """
+        -- scanner.py's incremental scan needs a prior size+mtime to compare
+        -- each file against; migration 1 omitted them, so add them here.
+        ALTER TABLE mod_files ADD COLUMN size INTEGER;
+        ALTER TABLE mod_files ADD COLUMN mtime REAL;
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
