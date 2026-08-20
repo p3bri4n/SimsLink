@@ -11,6 +11,7 @@ import download_watcher
 import i18n
 import scanner
 from config import Config, ConfigError
+from ui import crash_mode as crash_mode_view
 from ui import library as library_view
 from ui import settings as settings_view
 
@@ -48,19 +49,22 @@ def main(page: ft.Page) -> None:
         )
 
         library = library_view.build(config=config, conn=conn, page=page, t=t)
+        crash_control = crash_mode_view.build(config=config, conn=conn, page=page, t=t)
         settings_control = settings_view.build(
             config=config, t=t, current_language=state["language"], on_language_change=set_language
         )
-        content_area = ft.Container(content=library.control, expand=True)
+        views = [library.control, crash_control, settings_control]
+        content_area = ft.Container(content=views[0], expand=True)
 
         def show(index: int) -> None:
-            content_area.content = library.control if index == 0 else settings_control
+            content_area.content = views[index]
             page.update()
 
         nav = ft.Row(
             controls=[
                 ft.TextButton(content=t("nav.library"), on_click=lambda e: show(0)),
-                ft.TextButton(content=t("nav.settings"), on_click=lambda e: show(1)),
+                ft.TextButton(content=t("nav.crash_mode"), on_click=lambda e: show(1)),
+                ft.TextButton(content=t("nav.settings"), on_click=lambda e: show(2)),
             ]
         )
 

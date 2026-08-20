@@ -1,0 +1,10 @@
+Exception Type: RuntimeError
+Time (Local): 2026-08-20 21:14:03
+Traceback (most recent call last):
+  File "T:\InGame\Gameplay\Scripts\Core\services\zone_spin_up_service.py", line 214, in _on_zone_load
+    self._run_callbacks()
+  File "T:\InGame\Gameplay\Scripts\Core\services\zone_spin_up_service.py", line 240, in _run_callbacks
+    callback()
+  File "C:\Users\Test\Documents\Electronic Arts\The Sims 4\Mods\bettermod\bettermod.ts4script\bettermod\main.py", line 42, in on_zone_load
+    raise RuntimeError("boom")
+RuntimeError: boom

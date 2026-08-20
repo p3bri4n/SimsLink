@@ -44,5 +44,24 @@
   "download.detected_replace_message": "New file detected: {filename}. This looks like an update for '{mod_name}'. Replace it?",
   "download.install_button": "Install",
   "download.replace_button": "Replace",
-  "download.dismiss_button": "Dismiss"
+  "download.dismiss_button": "Dismiss",
+
+  "crash.analyze_button": "I crashed",
+  "crash.no_exception_file": "No lastException.txt found — nothing to analyze.",
+  "crash.suspects_heading": "Suspect mods:",
+  "crash.suspect_line": "{name} ({confidence}) — {reason}",
+  "crash.no_suspects": "No suspect found directly in the trace.",
+  "crash.start_bisection": "Start bisection",
+  "crash.bisection_round": "Testing: disabled {mods}. Relaunch the game, then report what happened.",
+  "crash.bisection_still_crashes": "Still crashes",
+  "crash.bisection_fixed": "Crash is gone",
+  "crash.bisection_converged": "Prime suspect: {name}.",
+  "crash.bisection_inconclusive": "Bisection finished without isolating a single mod.",
+  "crash.confirm_faulty": "Confirm this mod caused the crash",
+  "crash.faulty_confirmed": "Recorded '{name}' as the confirmed cause.",
+  "crash.clear_cache_button": "Clear cache",
+  "crash.clear_cache_title": "Clear cache?",
+  "crash.clear_cache_nothing": "Nothing to clear.",
+  "crash.clear_cache_cancel": "Cancel",
+  "crash.clear_cache_confirm": "Clear"
 }

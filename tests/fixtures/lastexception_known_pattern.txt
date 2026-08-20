@@ -1,0 +1,7 @@
+Exception Type: ModuleNotFoundError
+Time (Local): 2026-08-20 21:33:47
+Traceback (most recent call last):
+  File "<frozen importlib._bootstrap>", line 219, in _call_with_frames_removed
+  File "somemod.ts4script/somemod/main.py", line 5, in <module>
+    from sims4communitylib.utils import CommonUtils
+ModuleNotFoundError: No module named 'sims4communitylib'

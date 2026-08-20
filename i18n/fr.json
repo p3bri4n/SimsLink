@@ -44,5 +44,24 @@
   "download.detected_replace_message": "Fichier détecté : {filename}. Cela ressemble à une mise à jour de '{mod_name}'. Remplacer ?",
   "download.install_button": "Installer",
   "download.replace_button": "Remplacer",
-  "download.dismiss_button": "Ignorer"
+  "download.dismiss_button": "Ignorer",
+
+  "crash.analyze_button": "J'ai crashé",
+  "crash.no_exception_file": "Aucun lastException.txt trouvé — rien à analyser.",
+  "crash.suspects_heading": "Mods suspects :",
+  "crash.suspect_line": "{name} ({confidence}) — {reason}",
+  "crash.no_suspects": "Aucun suspect trouvé directement dans la trace.",
+  "crash.start_bisection": "Démarrer la bissection",
+  "crash.bisection_round": "Test en cours : désactivés {mods}. Relancez le jeu, puis indiquez ce qui s'est passé.",
+  "crash.bisection_still_crashes": "Ça crashe toujours",
+  "crash.bisection_fixed": "Le crash a disparu",
+  "crash.bisection_converged": "Suspect principal : {name}.",
+  "crash.bisection_inconclusive": "La bissection s'est terminée sans isoler un seul mod.",
+  "crash.confirm_faulty": "Confirmer que ce mod a causé le crash",
+  "crash.faulty_confirmed": "'{name}' enregistré comme cause confirmée.",
+  "crash.clear_cache_button": "Vider le cache",
+  "crash.clear_cache_title": "Vider le cache ?",
+  "crash.clear_cache_nothing": "Rien à vider.",
+  "crash.clear_cache_cancel": "Annuler",
+  "crash.clear_cache_confirm": "Vider"
 }

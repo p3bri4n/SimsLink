@@ -1,0 +1,8 @@
+Exception Type: ValueError
+Time (Local): 2026-08-20 21:20:11
+Traceback (most recent call last):
+  File "T:\InGame\Gameplay\Scripts\Core\services\sim_info_service.py", line 88, in _process
+    return self._compute()
+  File "T:\InGame\Gameplay\Scripts\Core\services\sim_info_service.py", line 55, in _compute
+    raise ValueError("core issue")
+ValueError: core issue
