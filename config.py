@@ -19,6 +19,11 @@ REQUIRED_VARS = (
 
 DEFAULT_DOWNLOAD_WATCH_DIR = Path.home() / "Downloads"
 
+# Resolved next to this file (the project root), not the process's cwd — cwd
+# varies depending on how the app is launched (e.g. `flet run` doesn't
+# guarantee it matches the directory .env was created in).
+DEFAULT_ENV_PATH = Path(__file__).resolve().parent / ".env"
+
 # The SQLite DB isn't user-configurable — it's app state, not a mod library
 # concern — so it lives in the standard XDG data location, not LIBRARY_DIR.
 DEFAULT_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "simslink"
@@ -55,7 +60,7 @@ class Config:
     def from_env(cls, env_path: Path | None = None) -> Config:
         # Real environment variables take precedence over the .env file, matching
         # python-dotenv's own default (override=False) and standard 12-factor practice.
-        values = {**dotenv_values(env_path or Path(".env")), **os.environ}
+        values = {**dotenv_values(env_path or DEFAULT_ENV_PATH), **os.environ}
 
         missing = [name for name in REQUIRED_VARS if not values.get(name, "").strip()]
         if missing:
