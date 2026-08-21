@@ -1,8 +1,7 @@
-"""FastAPI backend — first vertical slice of the Flet-to-FastAPI/pywebview
-migration (see CLAUDE.md's "Architecture" and "Current project status").
-Only the Library view (list/detail/enable/disable/delete/open-folder) is
-wired up; Catalog/Updates/Crash Mode/Settings still live only in the Flet
-app (`ui/*.py`) for now.
+"""FastAPI backend — Flet-to-FastAPI/pywebview migration (see CLAUDE.md's
+"Architecture" and "Current project status"). All five views (Library,
+Catalog, Updates, Crash Mode, Settings) are wired up here now; `ui/*.py`
+(Flet) is kept only until the cutover (removing it) is confirmed.
 
 Serves `frontend/` as static files too, so the whole app is reachable at
 http://localhost:8000/ with a single origin — no CORS needed. Everything
@@ -22,21 +21,41 @@ throwaway temp Config/DB via FastAPI's TestClient, the same way the Flet
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sqlite3
+import tempfile
+import webbrowser
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
+import cache_cleaner
+import crash_analyzer
 import curseforge
 import db
 import dependencies
+import download_watcher
 import mod_manager
 from config import Config
 
 APP_VERSION = "0.1.0"  # keep in sync with pyproject.toml's [project].version
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+
+
+class OpenExternalRequest(BaseModel):
+    url: str
+
+
+class BisectionReport(BaseModel):
+    crash_occurred: bool
+
+
+class ConfirmFaultyRequest(BaseModel):
+    mod_id: str
 
 
 def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
@@ -51,9 +70,19 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
     # Resolved once at app creation, not per-request — verify_key() is a
     # network call. Mirrors main.py's (Flet) Direct/Assisted resolution.
     direct_mode = False
+    cf_client: curseforge.CurseForgeClient | None = None
     if config.has_api_key:
         candidate = curseforge.CurseForgeClient(config.curseforge_api_key)
-        direct_mode = candidate.verify_key()
+        if candidate.verify_key():
+            direct_mode = True
+            cf_client = candidate
+
+    def require_client() -> curseforge.CurseForgeClient:
+        if cf_client is None:
+            raise HTTPException(
+                status_code=400, detail="Catalog requires Direct Mode (a valid CURSEFORGE_API_KEY)"
+            )
+        return cf_client
 
     def get_conn():
         conn = db.connect(db_path)
@@ -173,6 +202,244 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
         if library_path.is_dir():
             subprocess.Popen(["xdg-open", str(library_path)])  # best-effort, Linux-only
         return {"opened": str(library_path)}
+
+    def build_metadata(
+        curseforge_id: int, mod_info: curseforge.CurseForgeMod, latest: curseforge.CurseForgeFile
+    ) -> mod_manager.ModMetadata:
+        # Shared by install_from_catalog (new install) and apply_update
+        # (replace) — both need the same fresh-metadata shape.
+        return mod_manager.ModMetadata(
+            curseforge_id=curseforge_id,
+            author=mod_info.author,
+            category=mod_info.category,
+            installed_version=str(latest.file_id),
+            compat_status=curseforge.compat_status(
+                latest.game_version_min, latest.game_version_max, config.game_version
+            ),
+            short_description=mod_info.short_description,
+            thumbnail_url=mod_info.thumbnail_url,
+            links=json.dumps({"curseforge_url": mod_info.curseforge_url}) if mod_info.curseforge_url else None,
+            game_version_min=latest.game_version_min,
+            game_version_max=latest.game_version_max,
+            third_party_distribution_allowed=mod_info.third_party_distribution_allowed,
+        )
+
+    def catalog_mod_dict(mod: curseforge.CurseForgeMod) -> dict:
+        # No compat_status here on purpose: CurseForge search results don't
+        # carry game-version ranges (only a file listing does), so the
+        # catalog can't classify compatibility until a specific file is
+        # picked at install time — same limitation ui/catalog.py (Flet) had.
+        return {
+            "mod_id": mod.mod_id,
+            "name": mod.name,
+            "author": mod.author,
+            "category": mod.category,
+            "short_description": mod.short_description,
+            "thumbnail_url": mod.thumbnail_url,
+            "curseforge_url": mod.curseforge_url,
+            "third_party_distribution_allowed": mod.third_party_distribution_allowed,
+        }
+
+    @app.get("/api/catalog/search")
+    def search_catalog(q: str = "") -> list[dict]:
+        client = require_client()
+        try:
+            mods = client.search_mods(q, game_version=config.game_version)
+        except curseforge.CurseForgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return [catalog_mod_dict(mod) for mod in mods]
+
+    @app.post("/api/catalog/{curseforge_mod_id}/install")
+    def install_from_catalog(
+        curseforge_mod_id: int, conn: sqlite3.Connection = Depends(get_conn)
+    ) -> dict:
+        client = require_client()
+        try:
+            files = client.get_files(curseforge_mod_id)
+            if not files:
+                raise curseforge.CurseForgeError(f"No files available for mod {curseforge_mod_id}")
+            latest = files[0]
+            mod_info = client.get_mod(curseforge_mod_id)
+            with tempfile.TemporaryDirectory(prefix="simslink-cf-") as tmp:
+                downloaded = client.download(curseforge_mod_id, latest.file_id, Path(tmp) / latest.file_name)
+                metadata = build_metadata(curseforge_mod_id, mod_info, latest)
+                new_mod_id = mod_manager.install(
+                    downloaded, config=config, conn=conn, mod_name=mod_info.name, metadata=metadata
+                )
+        except curseforge.CurseForgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except mod_manager.ModManagerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return mod_summary(get_mod_row(new_mod_id, conn))
+
+    @app.post("/api/open-external")
+    def open_external(payload: OpenExternalRequest) -> dict:
+        # Opens in the system's default browser, never inside the app's own
+        # pywebview window (CLAUDE.md's Assisted Mode step 1). Scheme is
+        # restricted to http(s) so this can't be used to hand webbrowser.open
+        # a file:// path or similar off a URL nothing here has vetted.
+        if urlparse(payload.url).scheme not in ("http", "https"):
+            raise HTTPException(status_code=400, detail="Only http(s) URLs can be opened externally")
+        webbrowser.open(payload.url)
+        return {"opened": payload.url}
+
+    # --- Updates -----------------------------------------------------------------
+
+    def mod_curseforge_url(row: sqlite3.Row) -> str | None:
+        if not row["links"]:
+            return None
+        return (json.loads(row["links"]) or {}).get("curseforge_url")
+
+    @app.get("/api/updates/checklist")
+    def updates_checklist(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        # Assisted Mode's manual checklist: every installed mod with a known
+        # CurseForge URL, regardless of mode — harmless to expose in Direct
+        # Mode too, the frontend just doesn't render it there.
+        rows = conn.execute("SELECT * FROM mods ORDER BY name COLLATE NOCASE").fetchall()
+        checklist = []
+        for row in rows:
+            url = mod_curseforge_url(row)
+            if url:
+                checklist.append({"id": row["id"], "name": row["name"], "curseforge_url": url})
+        return checklist
+
+    @app.post("/api/updates/check")
+    def check_updates(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        # Direct Mode only, and only run on explicit request (this button
+        # click) — never eagerly, since it's a network call per linked mod.
+        client = require_client()
+        rows = conn.execute(
+            "SELECT * FROM mods WHERE curseforge_id IS NOT NULL ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        results = []
+        for row in rows:
+            try:
+                files = client.get_files(row["curseforge_id"])
+            except curseforge.CurseForgeError as exc:
+                results.append({"id": row["id"], "name": row["name"], "status": "error", "error": str(exc)})
+                continue
+            if not files:
+                continue
+            latest = files[0]
+            if str(latest.file_id) != (row["installed_version"] or ""):
+                results.append(
+                    {
+                        "id": row["id"],
+                        "name": row["name"],
+                        "status": "update_available",
+                        "latest_file_id": latest.file_id,
+                        "latest_file_name": latest.file_name,
+                    }
+                )
+            else:
+                results.append({"id": row["id"], "name": row["name"], "status": "up_to_date"})
+        return results
+
+    @app.post("/api/updates/{mod_id}/apply")
+    def apply_update(mod_id: str, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        client = require_client()
+        row = get_mod_row(mod_id, conn)
+        curseforge_id = row["curseforge_id"]
+        if curseforge_id is None:
+            raise HTTPException(status_code=400, detail=f"'{mod_id}' has no known CurseForge link")
+        try:
+            files = client.get_files(curseforge_id)
+            if not files:
+                raise curseforge.CurseForgeError(f"No files available for mod {curseforge_id}")
+            latest = files[0]
+            mod_info = client.get_mod(curseforge_id)
+            with tempfile.TemporaryDirectory(prefix="simslink-cf-update-") as tmp:
+                downloaded = client.download(curseforge_id, latest.file_id, Path(tmp) / latest.file_name)
+                metadata = build_metadata(curseforge_id, mod_info, latest)
+                new_mod_id = download_watcher.confirm_replace(
+                    downloaded, mod_id, config=config, conn=conn, metadata=metadata
+                )
+        except curseforge.CurseForgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except (mod_manager.ModManagerError, download_watcher.DownloadWatcherError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return mod_summary(get_mod_row(new_mod_id, conn))
+
+    # --- Crash Mode ----------------------------------------------------------------
+
+    def suspect_dict(suspect: crash_analyzer.Suspect) -> dict:
+        return {"mod_id": suspect.mod_id, "confidence": suspect.confidence, "reason": suspect.reason}
+
+    @app.post("/api/crash/analyze")
+    def analyze_crash(conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        exception_path = config.sims4_user_dir / "lastException.txt"
+        if not exception_path.is_file():
+            return {"found": False, "crash_log_id": None, "suspects": []}
+        raw = exception_path.read_text(encoding="utf-8", errors="replace")
+        crash_log_id = crash_analyzer.record_crash(raw, conn=conn)
+        suspects = crash_analyzer.get_suspects(crash_log_id, conn)
+        return {
+            "found": True,
+            "crash_log_id": crash_log_id,
+            "suspects": [suspect_dict(s) for s in suspects],
+        }
+
+    @app.post("/api/crash/{crash_log_id}/bisection/start")
+    def start_bisection(crash_log_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        try:
+            disabled = crash_analyzer.start_bisection(crash_log_id, config=config, conn=conn)
+        except crash_analyzer.CrashAnalyzerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"disabled": disabled}
+
+    @app.post("/api/crash/{crash_log_id}/bisection/report")
+    def report_bisection(
+        crash_log_id: int, payload: BisectionReport, conn: sqlite3.Connection = Depends(get_conn)
+    ) -> dict:
+        try:
+            result = crash_analyzer.report_bisection_result(
+                crash_log_id, payload.crash_occurred, config=config, conn=conn
+            )
+        except crash_analyzer.CrashAnalyzerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if isinstance(result, list):
+            return {"status": "next_round", "disabled": result}
+        if result is not None:
+            return {"status": "converged", "mod_id": result}
+        return {"status": "inconclusive"}
+
+    @app.post("/api/crash/{crash_log_id}/confirm-faulty")
+    def confirm_faulty(
+        crash_log_id: int, payload: ConfirmFaultyRequest, conn: sqlite3.Connection = Depends(get_conn)
+    ) -> dict:
+        # Records the user's explicit confirmation only — never deletes the
+        # mod itself (CLAUDE.md: "Never silently auto-delete a mod based on
+        # crash analysis"). Deleting it afterward is a separate Library action.
+        crash_analyzer.confirm_faulty_mod(crash_log_id, payload.mod_id, conn)
+        return {"confirmed": payload.mod_id}
+
+    @app.get("/api/cache/targets")
+    def get_cache_targets() -> list[dict]:
+        return [
+            {"name": t.name, "description": t.description}
+            for t in cache_cleaner.list_cache_targets(config)
+            if t.exists
+        ]
+
+    @app.post("/api/cache/clean")
+    def clean_cache_route() -> dict:
+        # No confirmation prompt here by design — that's the frontend's job
+        # (CLAUDE.md: "always require confirmation before deleting"), this
+        # route only executes once the user has already confirmed.
+        cleaned = cache_cleaner.clean_cache(config)
+        return {"cleaned": cleaned}
+
+    # --- Settings ------------------------------------------------------------------
+
+    @app.get("/api/settings")
+    def get_settings() -> dict:
+        return {
+            "game_dir": str(config.sims4_game_dir),
+            "mods_dir": str(config.sims4_mods_dir),
+            "user_dir": str(config.sims4_user_dir),
+            "library_dir": str(config.library_dir),
+            "download_watch_dir": str(config.download_watch_dir),
+        }
 
     # Registered last so it never shadows the /api/ routes above.
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

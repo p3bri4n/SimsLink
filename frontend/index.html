@@ -26,29 +26,113 @@
   </div>
 
   <div class="sidebar">
-    <div class="nav-item active"><span data-i18n="nav.library">Library</span></div>
-    <!-- Catalog/Updates/Crash Mode/Settings aren't wired to this frontend
-         yet (still only in the Flet app's ui/*.py) — shown for the shell's
-         visual layout, not yet clickable. -->
-    <div class="nav-item disabled"><span data-i18n="nav.catalog">Catalog</span></div>
-    <div class="nav-item disabled"><span data-i18n="nav.updates">Updates</span></div>
-    <div class="nav-item disabled"><span data-i18n="nav.crash_mode">Crash Mode</span></div>
+    <div class="nav-item active" data-view="library"><span data-i18n="nav.library">Library</span></div>
+    <div class="nav-item" data-view="catalog"><span data-i18n="nav.catalog">Catalog</span></div>
+    <div class="nav-item" data-view="updates"><span data-i18n="nav.updates">Updates</span></div>
+    <div class="nav-item" data-view="crash"><span data-i18n="nav.crash_mode">Crash Mode</span></div>
     <div class="sidebar-divider"></div>
-    <div class="nav-item disabled"><span data-i18n="nav.settings">Settings</span></div>
+    <div class="nav-item" data-view="settings"><span data-i18n="nav.settings">Settings</span></div>
     <div class="sidebar-foot" id="footVersion">—</div>
   </div>
 
   <div class="main">
-    <div class="main-head">
-      <div>
-        <h1 data-i18n="library.title">Library</h1>
-        <div class="sub" id="subtitle"></div>
+    <section id="view-library" class="view">
+      <div class="main-head">
+        <div>
+          <h1 data-i18n="library.title">Library</h1>
+          <div class="sub" id="subtitle"></div>
+        </div>
       </div>
-    </div>
 
-    <div class="error-banner" id="errorBanner"></div>
+      <div class="error-banner" id="errorBanner"></div>
 
-    <div class="grid" id="grid"></div>
+      <div class="grid" id="grid"></div>
+    </section>
+
+    <section id="view-catalog" class="view" hidden>
+      <div class="main-head">
+        <div>
+          <h1 data-i18n="catalog.title">Catalog</h1>
+          <div class="sub" data-i18n="catalog.subtitle">Browse and install mods from CurseForge.</div>
+        </div>
+      </div>
+
+      <div class="error-banner" id="catalogErrorBanner"></div>
+
+      <!-- Exactly one of these two is shown, based on /api/status's
+           direct_mode — Catalog needs zero API access to render, but has
+           nothing to browse without one (CLAUDE.md's mode table). -->
+      <div id="catalogAssistedNotice" class="empty-state" hidden data-i18n="catalog.assisted_mode_notice"></div>
+
+      <div id="catalogSearchBar" class="search-row" hidden>
+        <div class="search-wrap search-wrap--inline">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input type="text" id="catalogSearchInput" data-i18n-placeholder="catalog.search_placeholder">
+        </div>
+        <button class="btn primary" id="catalogSearchButton" data-i18n="catalog.search_button">Search</button>
+      </div>
+
+      <div id="catalogResults" class="catalog-list"></div>
+    </section>
+
+    <section id="view-updates" class="view" hidden>
+      <div class="main-head">
+        <div>
+          <h1 data-i18n="updates.title">Updates</h1>
+          <div class="sub" data-i18n="updates.subtitle">Check for and apply mod updates.</div>
+        </div>
+      </div>
+
+      <div class="error-banner" id="updatesErrorBanner"></div>
+
+      <!-- Assisted Mode: manual checklist of CurseForge links. Direct Mode:
+           on-demand "Check for updates" against the latest CurseForge file
+           per linked mod (never automatic — CLAUDE.md's mode table). -->
+      <div id="updatesAssistedNotice" class="empty-state" hidden data-i18n="updates.assisted_notice"></div>
+      <div id="updatesChecklist" class="catalog-list" hidden></div>
+
+      <div id="updatesDirectBar" class="search-row" hidden>
+        <div class="sub" data-i18n="updates.direct_notice" style="flex:1"></div>
+        <button class="btn primary" id="updatesCheckButton" data-i18n="updates.check_button">Check for updates</button>
+      </div>
+      <div id="updatesResults" class="catalog-list" hidden></div>
+    </section>
+
+    <section id="view-crash" class="view" hidden>
+      <div class="main-head">
+        <div>
+          <h1 data-i18n="crash.title">Crash Mode</h1>
+          <div class="sub" data-i18n="crash.subtitle">Diagnose the last crash and clean up stale cache.</div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="crashClearCacheButton" data-i18n="crash.clear_cache_button">Clear cache</button>
+          <button class="btn primary" id="crashAnalyzeButton" data-i18n="crash.analyze_button">I crashed</button>
+        </div>
+      </div>
+
+      <div class="error-banner" id="crashErrorBanner"></div>
+
+      <div id="crashStatus"></div>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <div class="main-head">
+        <div><h1 data-i18n="settings.title">Settings</h1></div>
+      </div>
+
+      <div class="detail-section">
+        <h4 data-i18n="settings.folders_heading">Folders</h4>
+        <div id="settingsFolders"></div>
+      </div>
+
+      <div class="detail-section">
+        <h4 data-i18n="settings.language_heading">Language</h4>
+        <select id="languageSelect">
+          <option value="en">English</option>
+          <option value="fr">Français</option>
+        </select>
+      </div>
+    </section>
   </div>
 </div>
 
@@ -88,6 +172,7 @@
   <div class="confirm-modal">
     <h3 id="confirmTitle">—</h3>
     <p id="confirmMessage">—</p>
+    <div id="confirmExtra"></div>
     <div class="confirm-actions">
       <button class="btn" id="confirmCancelBtn">—</button>
       <button class="btn danger" id="confirmOkBtn">—</button>

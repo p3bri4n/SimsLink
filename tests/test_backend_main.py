@@ -12,15 +12,20 @@ CLAUDE.md's "Current project status" — both apps coexist during migration).
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import zipfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+import curseforge
 import dependencies as deps
 import mod_manager
 from backend.main import create_app
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -191,3 +196,377 @@ def test_root_serves_frontend_index(client):
 
     assert response.status_code == 200
     assert "SimsLink" in response.text
+
+
+# --- /api/catalog ------------------------------------------------------------------
+
+
+class _FakeCurseForgeClient:
+    """Stands in for curseforge.CurseForgeClient — nothing here touches the
+    network or needs a real API key (see CLAUDE.md's testing note on
+    mode-dependent code)."""
+
+    def __init__(self, search_results=None, files_by_mod=None, mod_by_id=None, *, fail_search=None):
+        self._search_results = search_results or []
+        self._files_by_mod = files_by_mod or {}
+        self._mod_by_id = mod_by_id or {}
+        self._fail_search = fail_search
+        self.download_calls: list[tuple[int, int]] = []
+
+    def verify_key(self) -> bool:
+        return True
+
+    def search_mods(self, query: str, *, game_version=None):
+        if self._fail_search is not None:
+            raise self._fail_search
+        return self._search_results
+
+    def get_files(self, mod_id: int):
+        return self._files_by_mod.get(mod_id, [])
+
+    def get_mod(self, mod_id: int):
+        return self._mod_by_id[mod_id]
+
+    def download(self, mod_id: int, file_id: int, destination: Path) -> Path:
+        self.download_calls.append((mod_id, file_id))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"data")
+        return destination
+
+
+def _direct_client(app_config, tmp_path, monkeypatch, fake: _FakeCurseForgeClient) -> TestClient:
+    monkeypatch.setattr("backend.main.curseforge.CurseForgeClient", lambda api_key: fake)
+    direct_config = dataclasses.replace(app_config, curseforge_api_key="test-key")
+    return TestClient(create_app(direct_config, db_path=tmp_path / "simslink.sqlite3"))
+
+
+def _make_mod(**overrides) -> curseforge.CurseForgeMod:
+    defaults = dict(
+        mod_id=111,
+        name="Better Woohoo",
+        author="SomeAuthor",
+        category="Gameplay",
+        short_description="Makes it better.",
+        thumbnail_url=None,
+        curseforge_url="https://www.curseforge.com/sims4/mods/better-woohoo",
+        third_party_distribution_allowed=True,
+    )
+    defaults.update(overrides)
+    return curseforge.CurseForgeMod(**defaults)
+
+
+def test_catalog_search_requires_direct_mode(client):
+    response = client.get("/api/catalog/search", params={"q": "woohoo"})
+
+    assert response.status_code == 400
+
+
+def test_catalog_search_returns_results_in_direct_mode(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient(search_results=[_make_mod()])
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.get("/api/catalog/search", params={"q": "woohoo"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["name"] == "Better Woohoo"
+    assert body[0]["third_party_distribution_allowed"] is True
+    assert "compat_status" not in body[0]
+
+
+def test_catalog_search_curseforge_error_returns_502(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient(fail_search=curseforge.CurseForgeError("rate limited"))
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.get("/api/catalog/search", params={"q": "woohoo"})
+
+    assert response.status_code == 502
+
+
+def test_catalog_install_requires_direct_mode(client):
+    response = client.post("/api/catalog/111/install")
+
+    assert response.status_code == 400
+
+
+def test_catalog_install_creates_mod_with_metadata(app_config, tmp_path, monkeypatch, conn):
+    mod = _make_mod(third_party_distribution_allowed=True)
+    fake = _FakeCurseForgeClient(
+        files_by_mod={
+            111: [
+                curseforge.CurseForgeFile(
+                    file_id=222,
+                    file_name="better-woohoo.package",
+                    download_url="https://example.com/222",
+                    game_version_min="1.90",
+                    game_version_max="1.110",
+                    release_type="release",
+                )
+            ]
+        },
+        mod_by_id={111: mod},
+    )
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post("/api/catalog/111/install")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Better Woohoo"
+    assert fake.download_calls == [(111, 222)]
+    row = conn.execute("SELECT * FROM mods WHERE curseforge_id = 111").fetchone()
+    assert row is not None
+    assert row["installed_version"] == "222"
+    assert row["compat_status"] == "unknown"  # no game_version configured in app_config
+
+
+def test_catalog_install_no_files_returns_502(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient(files_by_mod={}, mod_by_id={111: _make_mod()})
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post("/api/catalog/111/install")
+
+    assert response.status_code == 502
+
+
+# --- /api/open-external --------------------------------------------------------------
+
+
+def test_open_external_opens_http_url(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr("backend.main.webbrowser.open", lambda url: calls.append(url))
+
+    response = client.post("/api/open-external", json={"url": "https://www.curseforge.com/x"})
+
+    assert response.status_code == 200
+    assert calls == ["https://www.curseforge.com/x"]
+
+
+def test_open_external_rejects_non_http_scheme(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr("backend.main.webbrowser.open", lambda url: calls.append(url))
+
+    response = client.post("/api/open-external", json={"url": "file:///etc/passwd"})
+
+    assert response.status_code == 400
+    assert calls == []
+
+
+# --- /api/updates --------------------------------------------------------------------
+
+
+def test_updates_checklist_lists_only_mods_with_known_link(app_config, conn, tmp_path, client):
+    linked_id = _install_mod(app_config, conn, tmp_path, "Linked Mod", filename="linked.package")
+    conn.execute(
+        "UPDATE mods SET links = ? WHERE id = ?",
+        (json.dumps({"curseforge_url": "https://www.curseforge.com/x"}), linked_id),
+    )
+    conn.commit()
+    _install_mod(app_config, conn, tmp_path, "Unlinked Mod", filename="unlinked.package")
+
+    response = client.get("/api/updates/checklist")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["id"] == linked_id
+    assert body[0]["curseforge_url"] == "https://www.curseforge.com/x"
+
+
+def test_updates_check_requires_direct_mode(client):
+    response = client.post("/api/updates/check")
+
+    assert response.status_code == 400
+
+
+def test_updates_check_reports_available_and_up_to_date(app_config, conn, tmp_path, monkeypatch):
+    current_id = _install_mod(app_config, conn, tmp_path, "Current Mod", filename="current.package")
+    outdated_id = _install_mod(app_config, conn, tmp_path, "Outdated Mod", filename="outdated.package")
+    conn.execute("UPDATE mods SET curseforge_id = 111, installed_version = '222' WHERE id = ?", (current_id,))
+    conn.execute("UPDATE mods SET curseforge_id = 333, installed_version = '444' WHERE id = ?", (outdated_id,))
+    conn.commit()
+
+    fake = _FakeCurseForgeClient(
+        files_by_mod={
+            111: [
+                curseforge.CurseForgeFile(
+                    file_id=222,
+                    file_name="current.package",
+                    download_url=None,
+                    game_version_min=None,
+                    game_version_max=None,
+                    release_type="release",
+                )
+            ],
+            333: [
+                curseforge.CurseForgeFile(
+                    file_id=555,
+                    file_name="outdated-v2.package",
+                    download_url=None,
+                    game_version_min=None,
+                    game_version_max=None,
+                    release_type="release",
+                )
+            ],
+        }
+    )
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post("/api/updates/check")
+
+    assert response.status_code == 200
+    by_id = {entry["id"]: entry for entry in response.json()}
+    assert by_id[current_id]["status"] == "up_to_date"
+    assert by_id[outdated_id]["status"] == "update_available"
+    assert by_id[outdated_id]["latest_file_id"] == 555
+
+
+def test_updates_apply_installs_new_version(app_config, conn, tmp_path, monkeypatch):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Outdated Mod", filename="outdated.package")
+    conn.execute("UPDATE mods SET curseforge_id = 111, installed_version = '222' WHERE id = ?", (mod_id,))
+    conn.commit()
+
+    mod_info = _make_mod(mod_id=111, name="Outdated Mod")
+    fake = _FakeCurseForgeClient(
+        files_by_mod={
+            111: [
+                curseforge.CurseForgeFile(
+                    file_id=333,
+                    file_name="outdated-v2.package",
+                    download_url=None,
+                    game_version_min="1.90",
+                    game_version_max="1.120",
+                    release_type="release",
+                )
+            ]
+        },
+        mod_by_id={111: mod_info},
+    )
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post(f"/api/updates/{mod_id}/apply")
+
+    assert response.status_code == 200
+    assert fake.download_calls == [(111, 333)]
+    row = conn.execute("SELECT installed_version FROM mods WHERE curseforge_id = 111").fetchone()
+    assert row["installed_version"] == "333"
+
+
+def test_updates_apply_requires_curseforge_link(app_config, conn, tmp_path, monkeypatch):
+    mod_id = _install_mod(app_config, conn, tmp_path, "No Link Mod")
+    fake = _FakeCurseForgeClient()
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post(f"/api/updates/{mod_id}/apply")
+
+    assert response.status_code == 400
+
+
+# --- /api/crash --------------------------------------------------------------------
+
+
+def test_analyze_crash_reports_not_found_without_exception_file(client):
+    response = client.post("/api/crash/analyze")
+
+    assert response.status_code == 200
+    assert response.json() == {"found": False, "crash_log_id": None, "suspects": []}
+
+
+def test_analyze_crash_finds_direct_trace_suspect(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "bettermod", filename="bettermod.ts4script")
+    (app_config.sims4_user_dir / "lastException.txt").write_text(
+        (FIXTURES / "lastexception_mod_in_trace.txt").read_text()
+    )
+
+    response = client.post("/api/crash/analyze")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["found"] is True
+    assert body["crash_log_id"] is not None
+    assert any(s["mod_id"] == mod_id for s in body["suspects"])
+
+
+def test_bisection_full_roundtrip_confirms_faulty_mod(app_config, conn, tmp_path, client):
+    mod_ids = [
+        _install_mod(app_config, conn, tmp_path, f"Mod{i}", filename=f"mod{i}.package") for i in range(4)
+    ]
+    culprit = mod_ids[3]
+    (app_config.sims4_user_dir / "lastException.txt").write_text(
+        (FIXTURES / "lastexception_core_only.txt").read_text()
+    )
+
+    analyze_resp = client.post("/api/crash/analyze")
+    crash_log_id = analyze_resp.json()["crash_log_id"]
+    assert analyze_resp.json()["suspects"] == []
+
+    start_resp = client.post(f"/api/crash/{crash_log_id}/bisection/start")
+    assert start_resp.status_code == 200
+
+    status = "next_round"
+    disabled = start_resp.json()["disabled"]
+    for _ in range(6):
+        if status != "next_round":
+            break
+        crash_occurred = culprit not in disabled
+        report_resp = client.post(
+            f"/api/crash/{crash_log_id}/bisection/report", json={"crash_occurred": crash_occurred}
+        )
+        assert report_resp.status_code == 200
+        body = report_resp.json()
+        status = body["status"]
+        disabled = body.get("disabled", [])
+
+    assert status == "converged"
+    converged_mod_id = report_resp.json()["mod_id"]
+    assert converged_mod_id == culprit
+
+    confirm_resp = client.post(
+        f"/api/crash/{crash_log_id}/confirm-faulty", json={"mod_id": converged_mod_id}
+    )
+    assert confirm_resp.status_code == 200
+    row = conn.execute(
+        "SELECT confirmed_faulty_mod_id FROM crash_log WHERE id = ?", (crash_log_id,)
+    ).fetchone()
+    assert row["confirmed_faulty_mod_id"] == culprit
+    # Still not deleted — confirmation only records, never destroys.
+    assert conn.execute("SELECT COUNT(*) FROM mods WHERE id = ?", (culprit,)).fetchone()[0] == 1
+
+
+def test_bisection_start_unknown_crash_log_returns_400(client):
+    response = client.post("/api/crash/999/bisection/start")
+
+    assert response.status_code == 400
+
+
+# --- /api/cache --------------------------------------------------------------------
+
+
+def test_cache_targets_and_clean_roundtrip(app_config, client):
+    (app_config.sims4_user_dir / "localthumbcache.package").write_bytes(b"x")
+    (app_config.sims4_user_dir / "options.ini").write_bytes(b"protected")
+
+    targets_resp = client.get("/api/cache/targets")
+    assert targets_resp.status_code == 200
+    names = [t["name"] for t in targets_resp.json()]
+    assert "localthumbcache.package" in names
+
+    clean_resp = client.post("/api/cache/clean")
+    assert clean_resp.status_code == 200
+    assert "localthumbcache.package" in clean_resp.json()["cleaned"]
+    assert not (app_config.sims4_user_dir / "localthumbcache.package").exists()
+    assert (app_config.sims4_user_dir / "options.ini").exists()
+
+
+# --- /api/settings --------------------------------------------------------------------
+
+
+def test_get_settings_returns_configured_paths(app_config, client):
+    response = client.get("/api/settings")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["game_dir"] == str(app_config.sims4_game_dir)
+    assert body["mods_dir"] == str(app_config.sims4_mods_dir)
+    assert body["library_dir"] == str(app_config.library_dir)
