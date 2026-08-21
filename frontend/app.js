@@ -782,6 +782,8 @@ function renderDetail(mod) {
 
   document.getElementById("openFolderBtn").onclick = () => openFolder(mod.id);
   document.getElementById("deleteBtn").onclick = () => confirmDelete(mod);
+  document.getElementById("dTranslationSuggestions").innerHTML = "";
+  document.getElementById("detectTranslationBtn").onclick = () => doDetectTranslation(mod.id);
 }
 
 function buildDependencyRow(dep) {
@@ -801,7 +803,111 @@ function buildDependencyRow(dep) {
       )}`
     )
   );
+
+  if (dep.confidence === "suggested") {
+    const actions = document.createElement("span");
+    actions.className = "actions";
+    const confirmBtn = document.createElement("button");
+    confirmBtn.className = "btn btn-sm";
+    confirmBtn.textContent = t("library.detail.dependency_confirm_button");
+    confirmBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      resolveDependency(dep.id, "confirm");
+    });
+    const rejectBtn = document.createElement("button");
+    rejectBtn.className = "btn btn-sm";
+    rejectBtn.textContent = t("library.detail.dependency_reject_button");
+    rejectBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      resolveDependency(dep.id, "reject");
+    });
+    actions.appendChild(confirmBtn);
+    actions.appendChild(rejectBtn);
+    row.appendChild(actions);
+  }
+
   return row;
+}
+
+async function resolveDependency(dependencyId, action) {
+  try {
+    await apiRequest(`/api/dependencies/${dependencyId}/${action}`, { method: "POST" });
+    if (state.currentDetailId) await openDetail(state.currentDetailId);
+  } catch (err) {
+    showError("errorBanner", t("library.detail.dependency_action_error", { error: err.message }));
+  }
+}
+
+// --- translation detection ---------------------------------------------------------
+
+function groupSignalsBySource(signals) {
+  const bySource = new Map();
+  for (const signal of signals) {
+    if (!bySource.has(signal.source_mod_id)) {
+      bySource.set(signal.source_mod_id, {
+        source_mod_id: signal.source_mod_id,
+        source_mod_name: signal.source_mod_name,
+        methods: [],
+      });
+    }
+    bySource.get(signal.source_mod_id).methods.push(signal.method);
+  }
+  return [...bySource.values()];
+}
+
+async function doDetectTranslation(modId) {
+  const button = document.getElementById("detectTranslationBtn");
+  const container = document.getElementById("dTranslationSuggestions");
+  button.disabled = true;
+  container.innerHTML = "";
+  try {
+    const signals = await apiRequest(`/api/mods/${encodeURIComponent(modId)}/detect-translation`, {
+      method: "POST",
+    });
+    if (!signals.length) {
+      container.appendChild(
+        elementWithText("div", "empty-inline", t("library.detail.detect_translation_no_signals"))
+      );
+      return;
+    }
+    groupSignalsBySource(signals).forEach((group) => {
+      const methods = group.methods.map((m) => t(`library.detail.signal_method.${m}`)).join(", ");
+      const row = document.createElement("div");
+      row.className = "dep-row";
+      row.appendChild(
+        elementWithText(
+          "span",
+          null,
+          t("library.detail.translation_suggestion_line", { name: group.source_mod_name, methods })
+        )
+      );
+      const linkBtn = document.createElement("button");
+      linkBtn.className = "btn btn-sm primary";
+      linkBtn.textContent = t("library.detail.link_translation_button");
+      linkBtn.addEventListener("click", () => doSuggestTranslation(modId, group.source_mod_id, linkBtn));
+      row.appendChild(linkBtn);
+      container.appendChild(row);
+    });
+  } catch (err) {
+    showError("errorBanner", t("library.detail.detect_translation_error", { error: err.message }));
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function doSuggestTranslation(modId, sourceModId, button) {
+  button.disabled = true;
+  try {
+    await apiRequest(`/api/mods/${encodeURIComponent(modId)}/suggest-translation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_mod_id: sourceModId }),
+    });
+    if (state.currentDetailId) await openDetail(state.currentDetailId);
+  } catch (err) {
+    button.disabled = false;
+    showError("errorBanner", t("library.detail.dependency_action_error", { error: err.message }));
+  }
 }
 
 async function openFolder(modId) {

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo-simslink.jpeg" width="220" alt="SimsLink logo">
+  <img src="assets/logo-simslink.jpeg" width="330" alt="SimsLink logo">
 
 # ◆ SimsLink
 

@@ -256,7 +256,18 @@ def _read_packages(
     rows = conn.execute(
         "SELECT relative_path FROM mod_files WHERE mod_id = ? AND extension = '.package'", (mod_id,)
     ).fetchall()
-    return [package_parser.read_package(library_path / row["relative_path"]) for row in rows]
+    packages = []
+    for row in rows:
+        try:
+            packages.append(package_parser.read_package(library_path / row["relative_path"]))
+        except package_parser.DbpfError:
+            # A malformed/corrupted .package shouldn't crash detection for
+            # the whole mod — just treat this one file as inconclusive and
+            # keep checking the rest (stbl_signal already requires *every*
+            # candidate package to be STBL-only, so skipping here is at
+            # worst conservative, never a false positive).
+            continue
+    return packages
 
 
 def detect_translation_signals(candidate_mod_id: str, conn: sqlite3.Connection) -> list[DetectionSignal]:

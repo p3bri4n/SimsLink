@@ -235,6 +235,29 @@ def test_stbl_signal_none_when_candidate_has_ts4script(app_config, conn, dbpf_wr
     assert deps.stbl_signal(candidate_id, source_id, conn) is None
 
 
+def test_regression_stbl_signal_skips_unparseable_package_instead_of_raising(
+    app_config, conn, dbpf_writer, tmp_path
+):
+    """_read_packages() used to call package_parser.read_package() with no
+    error handling — a candidate .package that isn't valid DBPF (corrupted
+    download, non-standard file) crashed the whole detection call instead of
+    just being treated as inconclusive for that one file."""
+    source_id = _install_mod(app_config, conn, tmp_path, "Better Woohoo", filename="source.package")
+    # Small enough to pass is_translation_candidate()'s size check, but not
+    # a valid DBPF file at all (real read_package() raises DbpfError on it).
+    candidate_id = _install_mod(
+        app_config, conn, tmp_path, "Better Woohoo FR", filename="broken.package", content=b"not-a-dbpf-file"
+    )
+
+    dbpf_writer(
+        app_config.library_dir / source_id / "source.package",
+        [(pp.RESOURCE_TYPE_STBL, 5, 999, b"en-text")],
+    )
+    _rehash(conn, source_id, app_config.library_dir / source_id / "source.package")
+
+    assert deps.stbl_signal(candidate_id, source_id, conn) is None  # must not raise
+
+
 def test_is_translation_candidate_false_when_too_large(app_config, conn, tmp_path):
     candidate_id = _install_mod(
         app_config, conn, tmp_path, "Big Mod", filename="big.package", content=b"x" * 3_000_000

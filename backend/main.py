@@ -62,6 +62,10 @@ class ReplaceDownloadRequest(BaseModel):
     mod_id: str
 
 
+class SuggestTranslationRequest(BaseModel):
+    source_mod_id: str
+
+
 class PendingDownloadStore:
     """In-memory queue of detected-but-unconfirmed downloads (Assisted
     Mode). Written to by DownloadWatcher's background thread, read/drained
@@ -286,6 +290,59 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             "dependencies": [dependency_dict(link, conn) for link in links],
             "files": [f["relative_path"] for f in files],
         }
+
+    def get_dependency_row(dependency_id: int, conn: sqlite3.Connection) -> sqlite3.Row:
+        row = conn.execute("SELECT * FROM dependencies WHERE id = ?", (dependency_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"No such dependency: {dependency_id}")
+        return row
+
+    @app.post("/api/mods/{mod_id}/detect-translation")
+    def detect_translation(mod_id: str, conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        # On-demand only, one mod at a time — never a full-library scan (see
+        # dependencies.py's module docstring and CLAUDE.md's "Translation-mod
+        # detection"). Never writes to the DB by itself; suggest-translation
+        # below is the only path that does, and only on explicit user action.
+        get_mod_row(mod_id, conn)
+        signals = dependencies.detect_translation_signals(mod_id, conn)
+        results = []
+        for signal in signals:
+            source_row = conn.execute(
+                "SELECT name FROM mods WHERE id = ?", (signal.source_mod_id,)
+            ).fetchone()
+            results.append(
+                {
+                    "source_mod_id": signal.source_mod_id,
+                    "source_mod_name": source_row["name"] if source_row is not None else signal.source_mod_id,
+                    "method": signal.method,
+                    "strength": signal.strength,
+                }
+            )
+        return results
+
+    @app.post("/api/mods/{mod_id}/suggest-translation")
+    def suggest_translation_route(
+        mod_id: str, payload: SuggestTranslationRequest, conn: sqlite3.Connection = Depends(get_conn)
+    ) -> dict:
+        # Always lands as confidence='suggested' — dependencies.py enforces
+        # this itself, but the point stands: this route can propose a link,
+        # never confirm one. Only /api/dependencies/{id}/confirm can.
+        get_mod_row(mod_id, conn)
+        get_mod_row(payload.source_mod_id, conn)
+        dependency_id = dependencies.suggest_translation(mod_id, payload.source_mod_id, conn)
+        return {"id": dependency_id}
+
+    @app.post("/api/dependencies/{dependency_id}/confirm")
+    def confirm_dependency_route(dependency_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        get_dependency_row(dependency_id, conn)
+        dependencies.confirm_dependency(dependency_id, conn)
+        return {"id": dependency_id, "confidence": "confirmed"}
+
+    @app.post("/api/dependencies/{dependency_id}/reject")
+    def reject_dependency_route(dependency_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        get_dependency_row(dependency_id, conn)
+        dependencies.reject_dependency(dependency_id, conn)
+        return {"rejected": dependency_id}
 
     @app.post("/api/mods/{mod_id}/enable")
     def enable_mod(mod_id: str, conn: sqlite3.Connection = Depends(get_conn)) -> dict:

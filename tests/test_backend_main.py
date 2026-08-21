@@ -161,6 +161,94 @@ def test_get_mod_detail_dependency_falls_back_to_curseforge_id_when_unresolved_l
     assert dep["depends_on_curseforge_id"] == 999
 
 
+# --- translation detection + dependency confirm/reject ----------------------------
+#
+# Route tests stay thin: exercise one signal (name_heuristic, cheapest to
+# trigger — no dbpf_writer fixture needed) to prove the wiring is correct.
+# Every detection signal itself (description/name/STBL, weak vs strong) is
+# already covered by tests/test_dependencies.py.
+
+
+def test_detect_translation_finds_name_heuristic_signal(app_config, conn, tmp_path, client):
+    source_id = _install_mod(app_config, conn, tmp_path, "Better Woohoo", filename="source.package")
+    candidate_id = _install_mod(app_config, conn, tmp_path, "Better Woohoo [FR]", filename="candidate.package")
+
+    response = client.post(f"/api/mods/{candidate_id}/detect-translation")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(s["source_mod_id"] == source_id and s["method"] == "name_heuristic" for s in body)
+    assert body[0]["source_mod_name"] == "Better Woohoo"
+    # Detection alone never writes anything — no dependency created yet.
+    assert client.get(f"/api/mods/{candidate_id}").json()["dependencies"] == []
+
+
+def test_detect_translation_unknown_mod_returns_404(client):
+    response = client.post("/api/mods/does-not-exist/detect-translation")
+
+    assert response.status_code == 404
+
+
+def test_suggest_translation_creates_suggested_dependency(app_config, conn, tmp_path, client):
+    source_id = _install_mod(app_config, conn, tmp_path, "Better Woohoo", filename="source.package")
+    candidate_id = _install_mod(app_config, conn, tmp_path, "Better Woohoo [FR]", filename="candidate.package")
+
+    response = client.post(
+        f"/api/mods/{candidate_id}/suggest-translation", json={"source_mod_id": source_id}
+    )
+
+    assert response.status_code == 200
+    dep = client.get(f"/api/mods/{candidate_id}").json()["dependencies"][0]
+    assert dep["dependency_type"] == "translation"
+    assert dep["confidence"] == "suggested"  # never lands as confirmed directly
+    assert dep["resolved_name"] == "Better Woohoo"
+
+
+def test_suggest_translation_unknown_source_mod_returns_404(app_config, conn, tmp_path, client):
+    candidate_id = _install_mod(app_config, conn, tmp_path, "Better Woohoo [FR]")
+
+    response = client.post(
+        f"/api/mods/{candidate_id}/suggest-translation", json={"source_mod_id": "does-not-exist"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_confirm_dependency_route_updates_confidence(app_config, conn, tmp_path, client):
+    source_id = _install_mod(app_config, conn, tmp_path, "Core Lib", filename="core.package")
+    candidate_id = _install_mod(app_config, conn, tmp_path, "Needs Core", filename="needs.package")
+    dependency_id = deps.suggest_translation(candidate_id, source_id, conn)
+
+    response = client.post(f"/api/dependencies/{dependency_id}/confirm")
+
+    assert response.status_code == 200
+    dep = client.get(f"/api/mods/{candidate_id}").json()["dependencies"][0]
+    assert dep["confidence"] == "confirmed"
+
+
+def test_confirm_dependency_route_unknown_id_returns_404(client):
+    response = client.post("/api/dependencies/999999/confirm")
+
+    assert response.status_code == 404
+
+
+def test_reject_dependency_route_deletes_it(app_config, conn, tmp_path, client):
+    source_id = _install_mod(app_config, conn, tmp_path, "Core Lib", filename="core.package")
+    candidate_id = _install_mod(app_config, conn, tmp_path, "Needs Core", filename="needs.package")
+    dependency_id = deps.suggest_translation(candidate_id, source_id, conn)
+
+    response = client.post(f"/api/dependencies/{dependency_id}/reject")
+
+    assert response.status_code == 200
+    assert client.get(f"/api/mods/{candidate_id}").json()["dependencies"] == []
+
+
+def test_reject_dependency_route_unknown_id_returns_404(client):
+    response = client.post("/api/dependencies/999999/reject")
+
+    assert response.status_code == 404
+
+
 # --- enable / disable ------------------------------------------------------------
 
 
