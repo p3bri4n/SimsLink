@@ -1,7 +1,5 @@
 <div align="center">
-  <img src="assets/logo-simslink.jpeg" width="330" alt="SimsLink logo">
-
-# ◆ SimsLink
+  <img src="assets/logo-simslink.jpeg" width="439" alt="SimsLink logo">
 
 **A Linux-native mod manager for The Sims 4.**
 
