@@ -59,6 +59,88 @@ def test_match_known_pattern_empty_when_library_not_installed(app_config, conn):
     assert ca.analyze(raw, conn) == []
 
 
+# --- parse_reports: real lastException.txt is XML, may bundle several ------
+# occurrences in one file (CLAUDE.md's "Regression, fixed 2026-08-21")
+
+
+def test_parse_reports_splits_real_multi_occurrence_file(app_config, conn):
+    raw = (FIXTURES / "lastexception_real_multi_report.txt").read_text()
+
+    reports = ca.parse_reports(raw)
+
+    assert len(reports) == 3
+    # Each split-out report is that occurrence's own traceback text, not the
+    # whole file -- entities are resolved back to plain text (no leftover
+    # &lt;/&gt;/&#13; from the XML encoding) and unrelated occurrences don't
+    # bleed into each other.
+    assert "DramaNodeScoringBucket" in reports[0]
+    assert "DramaNodeScoringBucket" not in reports[1]
+    assert "Posture Exit" in reports[1]
+    assert "NotImplementedError" in reports[2]
+    for report in reports:
+        assert "&lt;" not in report and "&#13;" not in report
+
+
+def test_parse_reports_falls_back_to_whole_input_for_plain_text(app_config, conn):
+    raw = (FIXTURES / "lastexception_mod_in_trace.txt").read_text()
+
+    assert ca.parse_reports(raw) == [raw]
+
+
+def test_regression_parse_reports_extracts_mod_frame_from_real_xml_escaping(
+    app_config, conn, tmp_path
+):
+    # Real desyncdata content escapes '<'/'>' (e.g. "<function ... at 0x...>")
+    # but never the quotes inside `File "..."` frames -- confirms the
+    # frame-matching regex still works once ElementTree resolves entities,
+    # against a real captured crash rather than a synthetic fixture.
+    mod_id = _install_ts4script_mod(
+        app_config, conn, tmp_path, "WickedWhims", "WickedWhims_v185k.ts4script"
+    )
+    raw = (FIXTURES / "lastexception_real_mod_in_trace.txt").read_text()
+
+    [report] = ca.parse_reports(raw)
+    suspects = ca.analyze(report, conn)
+
+    assert any(s.mod_id == mod_id for s in suspects)
+
+
+# --- record_crash_reports: one crash_log row per occurrence, never merged ---
+
+
+def test_record_crash_reports_creates_one_row_per_occurrence(app_config, conn):
+    raw = (FIXTURES / "lastexception_real_multi_report.txt").read_text()
+
+    crash_log_ids = ca.record_crash_reports(raw, conn=conn)
+
+    assert len(crash_log_ids) == 3
+    assert len(set(crash_log_ids)) == 3
+    assert conn.execute("SELECT COUNT(*) FROM crash_log").fetchone()[0] == 3
+    stored = [
+        conn.execute(
+            "SELECT raw_last_exception FROM crash_log WHERE id = ?", (crash_log_id,)
+        ).fetchone()["raw_last_exception"]
+        for crash_log_id in crash_log_ids
+    ]
+    # Each row stores only its own occurrence's traceback -- not the other
+    # two, and not the raw multi-report file.
+    assert "DramaNodeScoringBucket" in stored[0]
+    assert "Posture Exit" not in stored[0]
+    assert "Posture Exit" in stored[1]
+    assert "NotImplementedError" in stored[2]
+
+
+def test_record_crash_reports_single_occurrence_matches_record_crash(app_config, conn, tmp_path):
+    mod_id = _install_ts4script_mod(app_config, conn, tmp_path, "bettermod", "bettermod.ts4script")
+    raw = (FIXTURES / "lastexception_mod_in_trace.txt").read_text()
+
+    [crash_log_id] = ca.record_crash_reports(raw, conn=conn)
+
+    suspects = ca.get_suspects(crash_log_id, conn)
+    assert len(suspects) == 1
+    assert suspects[0].mod_id == mod_id
+
+
 # --- record_crash: read-only w.r.t. mods, never auto-deletes ----------------
 
 

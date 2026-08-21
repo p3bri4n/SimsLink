@@ -106,6 +106,7 @@
   "crash.analyze_button": "I crashed",
   "crash.clear_cache_button": "Clear cache",
   "crash.no_exception_file": "No lastException.txt found — nothing to analyze.",
+  "crash.report_heading": "Occurrence {index} of {total}",
   "crash.suspects_heading": "Suspect mods:",
   "crash.suspect_line": "{name} ({confidence}) — {reason}",
   "crash.no_suspects": "No suspect found directly in the trace.",

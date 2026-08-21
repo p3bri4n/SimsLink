@@ -13,11 +13,24 @@ simply never calling mod_manager.delete()).
 Path-matching heuristic: a .ts4script traceback frame's `File "..."` format
 for zipimport-loaded modules varies across Python/game versions (it
 generally embeds the archive's filename, e.g.
-".../Mods/<mod_id>/foo.ts4script/module.py", but this hasn't been validated
-against a real lastException.txt — none is available in this environment).
-We match on the mod's folder name (mod_id) and its tracked file stems
-appearing anywhere in the frame path, which is robust to exact path-format
-differences.
+".../Mods/<mod_id>/foo.ts4script/module.py"). Validated 2026-08-21 against
+real lastException.txt files: mod-owned frames instead show up as relative
+paths (e.g. ".\\WickedWhims_v185k\\turbolib2\\events\\objects.py" or bare
+"lot51_core/utils/injection.pyc"), never the "inside a .ts4script archive"
+shape originally guessed — matching on mod_id/file-stem substrings anywhere
+in the frame path (rather than a specific path shape) turned out to be the
+right call, since it's robust to that difference too.
+
+File-format note (also only confirmed against real data on 2026-08-21):
+lastException.txt is not a single raw traceback — it's an XML document
+(`<root><report>...<desyncdata>TRACEBACK TEXT</desyncdata>...</report>...
+</root>`) that can bundle several unrelated crash occurrences accumulated
+over a play session in one file. parse_reports() splits those apart so each
+occurrence gets analyzed and stored as its own crash_log row — merging them
+would silently violate "never conclude from a single occurrence" by mixing
+suspects from unrelated incidents into one row. Plain, non-XML text (as
+used by this module's own test fixtures, and as a defensive fallback for
+any future format change) is still accepted as a single occurrence.
 """
 
 from __future__ import annotations
@@ -25,6 +38,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +71,25 @@ class Suspect:
     mod_id: str
     confidence: str  # 'direct_trace' | 'pattern_match'
     reason: str
+
+
+def parse_reports(raw_file_text: str) -> list[str]:
+    """Splits a lastException.txt file's content into one raw traceback
+    string per occurrence. The real file format is XML with a <report> per
+    occurrence, each carrying its traceback in <desyncdata> (see module
+    docstring); ElementTree's .text already resolves the entity-escaped
+    content back to plain text, no manual unescaping needed. Falls back to
+    treating the whole input as a single occurrence when it isn't that XML
+    shape (plain text, unparseable, or no <desyncdata> found) — the file
+    format could change again, and a single well-formed occurrence must
+    never be silently dropped just because splitting failed."""
+    try:
+        root = ET.fromstring(raw_file_text)
+    except ET.ParseError:
+        return [raw_file_text]
+
+    reports = [elem.text for elem in root.iter("desyncdata") if elem.text]
+    return reports or [raw_file_text]
 
 
 def parse_trace_frames(raw_exception: str) -> list[TraceFrame]:
@@ -147,6 +180,14 @@ def record_crash(raw_exception: str, *, conn: sqlite3.Connection) -> int:
     )
     conn.commit()
     return cursor.lastrowid
+
+
+def record_crash_reports(raw_file_text: str, *, conn: sqlite3.Connection) -> list[int]:
+    """Entry point for a freshly-read lastException.txt: splits it into its
+    individual occurrences via parse_reports() and records each as its own
+    crash_log row via record_crash(), returning one id per occurrence in
+    file order."""
+    return [record_crash(report, conn=conn) for report in parse_reports(raw_file_text)]
 
 
 def get_suspects(crash_log_id: int, conn: sqlite3.Connection) -> list[Suspect]:

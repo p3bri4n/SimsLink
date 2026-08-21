@@ -632,14 +632,22 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
     def analyze_crash(conn: sqlite3.Connection = Depends(get_conn)) -> dict:
         exception_path = config.sims4_user_dir / "lastException.txt"
         if not exception_path.is_file():
-            return {"found": False, "crash_log_id": None, "suspects": []}
+            return {"found": False, "reports": []}
         raw = exception_path.read_text(encoding="utf-8", errors="replace")
-        crash_log_id = crash_analyzer.record_crash(raw, conn=conn)
-        suspects = crash_analyzer.get_suspects(crash_log_id, conn)
+        # lastException.txt can bundle several unrelated occurrences in one
+        # file (see crash_analyzer's module docstring) — each becomes its
+        # own crash_log row so suspects from unrelated incidents are never
+        # mixed together.
+        crash_log_ids = crash_analyzer.record_crash_reports(raw, conn=conn)
         return {
             "found": True,
-            "crash_log_id": crash_log_id,
-            "suspects": [suspect_dict(s) for s in suspects],
+            "reports": [
+                {
+                    "crash_log_id": crash_log_id,
+                    "suspects": [suspect_dict(s) for s in crash_analyzer.get_suspects(crash_log_id, conn)],
+                }
+                for crash_log_id in crash_log_ids
+            ],
         }
 
     @app.post("/api/crash/{crash_log_id}/bisection/start")

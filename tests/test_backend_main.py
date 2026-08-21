@@ -614,7 +614,7 @@ def test_analyze_crash_reports_not_found_without_exception_file(client):
     response = client.post("/api/crash/analyze")
 
     assert response.status_code == 200
-    assert response.json() == {"found": False, "crash_log_id": None, "suspects": []}
+    assert response.json() == {"found": False, "reports": []}
 
 
 def test_analyze_crash_finds_direct_trace_suspect(app_config, conn, tmp_path, client):
@@ -628,8 +628,24 @@ def test_analyze_crash_finds_direct_trace_suspect(app_config, conn, tmp_path, cl
     assert response.status_code == 200
     body = response.json()
     assert body["found"] is True
-    assert body["crash_log_id"] is not None
-    assert any(s["mod_id"] == mod_id for s in body["suspects"])
+    assert len(body["reports"]) == 1
+    report = body["reports"][0]
+    assert report["crash_log_id"] is not None
+    assert any(s["mod_id"] == mod_id for s in report["suspects"])
+
+
+def test_analyze_crash_splits_real_xml_file_into_one_report_per_occurrence(app_config, conn, client):
+    (app_config.sims4_user_dir / "lastException.txt").write_text(
+        (FIXTURES / "lastexception_real_multi_report.txt").read_text()
+    )
+
+    response = client.post("/api/crash/analyze")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["found"] is True
+    assert len(body["reports"]) == 3
+    assert len({r["crash_log_id"] for r in body["reports"]}) == 3
 
 
 def test_bisection_full_roundtrip_confirms_faulty_mod(app_config, conn, tmp_path, client):
@@ -642,8 +658,9 @@ def test_bisection_full_roundtrip_confirms_faulty_mod(app_config, conn, tmp_path
     )
 
     analyze_resp = client.post("/api/crash/analyze")
-    crash_log_id = analyze_resp.json()["crash_log_id"]
-    assert analyze_resp.json()["suspects"] == []
+    report = analyze_resp.json()["reports"][0]
+    crash_log_id = report["crash_log_id"]
+    assert report["suspects"] == []
 
     start_resp = client.post(f"/api/crash/{crash_log_id}/bisection/start")
     assert start_resp.status_code == 200

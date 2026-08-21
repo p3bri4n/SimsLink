@@ -591,14 +591,32 @@ async function doAnalyzeCrash() {
     setCrashStatus(elementWithText("div", "empty-state", t("crash.no_exception_file")));
     return;
   }
-  renderSuspects(result.crash_log_id, result.suspects);
+  renderCrashReports(result.reports);
 }
 
-function renderSuspects(crashLogId, suspects) {
-  if (suspects.length) {
-    const nodes = [elementWithText("h4", null, t("crash.suspects_heading"))];
-    suspects.forEach((s) => {
-      nodes.push(
+function renderCrashReports(reports) {
+  if (!reports.length) {
+    setCrashStatus(elementWithText("div", "empty-state", t("crash.no_exception_file")));
+    return;
+  }
+  setCrashStatus(...reports.map((report, index) => renderCrashReportBlock(report, index, reports.length)));
+}
+
+// lastException.txt can bundle several unrelated occurrences in one file, so
+// /api/crash/analyze returns a list of reports (see crash_analyzer.py) —
+// each gets its own suspects list and its own independently-scoped
+// bisection flow, rather than pretending the file was a single incident.
+function renderCrashReportBlock(report, index, total) {
+  const block = document.createElement("div");
+  block.className = "crash-report-block";
+  if (total > 1) {
+    block.appendChild(elementWithText("h4", null, t("crash.report_heading", { index: index + 1, total })));
+  }
+
+  if (report.suspects.length) {
+    block.appendChild(elementWithText("h4", null, t("crash.suspects_heading")));
+    report.suspects.forEach((s) => {
+      block.appendChild(
         elementWithText(
           "div",
           "dep-row",
@@ -606,15 +624,16 @@ function renderSuspects(crashLogId, suspects) {
         )
       );
     });
-    setCrashStatus(...nodes);
-    return;
+    return block;
   }
 
   const startBtn = document.createElement("button");
   startBtn.className = "btn primary";
   startBtn.textContent = t("crash.start_bisection");
-  startBtn.addEventListener("click", () => startBisection(crashLogId));
-  setCrashStatus(elementWithText("div", "empty-state", t("crash.no_suspects")), startBtn);
+  startBtn.addEventListener("click", () => startBisection(report.crash_log_id));
+  block.appendChild(elementWithText("div", "empty-state", t("crash.no_suspects")));
+  block.appendChild(startBtn);
+  return block;
 }
 
 async function startBisection(crashLogId) {
