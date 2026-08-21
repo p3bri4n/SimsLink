@@ -1,7 +1,7 @@
 import pytest
 import requests
 
-import curseforge as cf
+from backend import curseforge as cf
 
 
 class FakeResponse:

@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from config import Config, ConfigError, DEFAULT_DOWNLOAD_WATCH_DIR, detect_symlink_support
+import backend.config as config_module
+from backend.config import Config, ConfigError, DEFAULT_DOWNLOAD_WATCH_DIR, detect_symlink_support
 
 ALL_ENV_VARS = (
     "SIMS4_GAME_DIR",
@@ -98,6 +99,20 @@ def test_real_env_var_overrides_dotenv_file(tmp_path, monkeypatch):
     config = Config.from_env(env_path)
 
     assert config.library_dir == Path("/from/real/environment")
+
+
+def test_regression_default_env_path_resolves_to_project_root_not_backend_dir():
+    """config.py lives in backend/, so a plain Path(__file__).parent (rather
+    than .parent.parent) would silently resolve DEFAULT_ENV_PATH to
+    backend/.env instead of the project root's .env — the real .env file
+    would then never be found by Config.from_env() with no explicit path."""
+    project_root = Path(config_module.__file__).resolve().parent.parent
+
+    assert config_module.DEFAULT_ENV_PATH == project_root / ".env"
+    # Ground-truth check independent of how many .parent hops the fix uses:
+    # the resolved directory must actually be the project root (pyproject.toml
+    # lives there), not backend/.
+    assert (config_module.DEFAULT_ENV_PATH.parent / "pyproject.toml").is_file()
 
 
 def test_detect_symlink_support_true_on_normal_filesystem(tmp_path):

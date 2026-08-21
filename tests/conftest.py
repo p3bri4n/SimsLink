@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import db as db_module
-from config import Config
+from backend import db as db_module
+from backend.config import Config
 
 DBPF_MAGIC = b"DBPF"
 _HEADER_SIZE = 96

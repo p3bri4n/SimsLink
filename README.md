@@ -21,6 +21,14 @@ pip install -e ".[dev]"
 cp .env.example .env  # fill in your Sims 4 paths
 ```
 
+## Run
+
+```bash
+simslink        # or: python desktop.py
+```
+
+Requires WebKitGTK for the desktop window (`python3-gi` + `gir1.2-webkit2-4.0` on Debian/Ubuntu-based distros).
+
 ## Tests
 
 ```bash

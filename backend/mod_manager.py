@@ -21,8 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator
 
-import dependencies
-from config import Config
+from . import dependencies
+from .config import Config
 
 TRACKED_EXTENSIONS = {".package", ".ts4script"}
 _HASH_CHUNK_SIZE = 1024 * 1024

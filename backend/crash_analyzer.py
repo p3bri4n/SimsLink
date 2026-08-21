@@ -29,8 +29,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-import mod_manager
-from config import Config
+from . import mod_manager
+from .config import Config
 
 _FRAME_RE = re.compile(r'File "(?P<file>[^"]+)", line (?P<line>\d+)(?:, in (?P<func>\S+))?')
 

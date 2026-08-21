@@ -103,5 +103,14 @@
   "settings.folder.user_dir": "Dossier utilisateur Sims 4",
   "settings.folder.library_dir": "Dossier bibliothèque",
   "settings.folder.download_watch_dir": "Dossier de téléchargement surveillé",
-  "settings.language_heading": "Langue"
+  "settings.language_heading": "Langue",
+
+  "downloads.detected_title": "Nouveau téléchargement détecté",
+  "downloads.detected_message": "Fichier détecté : {filename}. Installer ce mod ?",
+  "downloads.detected_replace_message": "Fichier détecté : {filename}. Cela ressemble à une mise à jour de '{mod_name}'. Remplacer ?",
+  "downloads.install_button": "Installer",
+  "downloads.replace_button": "Remplacer",
+  "downloads.error": "Impossible de traiter ce téléchargement : {error}",
+
+  "common.dismiss": "Ignorer"
 }

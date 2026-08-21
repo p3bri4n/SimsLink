@@ -4,10 +4,6 @@ assert the route calls the right mod_manager.py/dependencies.py function and
 translates its result/errors into the right HTTP status/JSON — the business
 logic itself is already covered by tests/test_mod_manager.py,
 tests/test_dependencies.py, etc.
-
-Named test_backend_main.py rather than test_main.py to avoid colliding with
-tests/test_main.py, which covers the pre-migration Flet main.py (see
-CLAUDE.md's "Current project status" — both apps coexist during migration).
 """
 
 from __future__ import annotations
@@ -20,21 +16,26 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import curseforge
-import dependencies as deps
-import mod_manager
+from backend import curseforge
+from backend import dependencies as deps
+from backend import mod_manager
 from backend.main import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
-def client(app_config, tmp_path) -> TestClient:
+def app(app_config, tmp_path):
     # Same tmp_path/"simslink.sqlite3" the `conn` fixture (conftest.py) uses,
     # so mods installed via `conn` in a test are visible through the app's
     # own connections — config.db_path itself is a fixed real XDG path (see
     # config.py), not something a test should point the app at.
-    return TestClient(create_app(app_config, db_path=tmp_path / "simslink.sqlite3"))
+    return create_app(app_config, db_path=tmp_path / "simslink.sqlite3")
+
+
+@pytest.fixture
+def client(app) -> TestClient:
+    return TestClient(app)
 
 
 def _install_mod(app_config, conn, tmp_path, name, filename="mymod.package", content=b"data") -> str:
@@ -570,3 +571,100 @@ def test_get_settings_returns_configured_paths(app_config, client):
     assert body["game_dir"] == str(app_config.sims4_game_dir)
     assert body["mods_dir"] == str(app_config.sims4_mods_dir)
     assert body["library_dir"] == str(app_config.library_dir)
+
+
+# --- /api/downloads (Assisted Mode detection) -----------------------------------------
+#
+# app.state.report_download(path) simulates a DownloadWatcher detection
+# synchronously, with no real filesystem watcher thread involved — the
+# watcher itself (watchdog Observer + debounce timers) is exercised for real
+# in tests/test_download_watcher.py; here we only need the app-level wiring
+# (pending-download store + routes) to be correct.
+
+
+def _write_zip(path: Path, filename: str, content: bytes = b"data") -> Path:
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(filename, content)
+    return path
+
+
+def test_pending_downloads_empty_initially(client):
+    response = client.get("/api/downloads/pending")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_report_download_adds_to_pending_list_without_candidate(app, client, tmp_path):
+    archive = _write_zip(tmp_path / "NewMod.zip", "new.package")
+
+    app.state.report_download(archive)
+
+    items = client.get("/api/downloads/pending").json()
+    assert len(items) == 1
+    assert items[0]["filename"] == "NewMod.zip"
+    assert items[0]["candidate_mod_id"] is None
+    assert "path" not in items[0]  # never leak the raw filesystem path
+
+
+def test_report_download_suggests_replace_candidate_for_similar_name(
+    app, client, app_config, conn, tmp_path
+):
+    mod_id = mod_manager.install(
+        _write_zip(tmp_path / "source.zip", "mymod.package"),
+        config=app_config, conn=conn, mod_name="Cool Mod",
+    )
+    archive = _write_zip(tmp_path / "Cool-Mod-v2.zip", "mymod.package")
+
+    app.state.report_download(archive)
+
+    items = client.get("/api/downloads/pending").json()
+    assert items[0]["candidate_mod_id"] == mod_id
+    assert items[0]["candidate_mod_name"] == "Cool Mod"
+
+
+def test_install_pending_download_installs_new_mod(app, client, tmp_path):
+    archive = _write_zip(tmp_path / "NewMod.zip", "new.package")
+    app.state.report_download(archive)
+    token = client.get("/api/downloads/pending").json()[0]["token"]
+
+    response = client.post(f"/api/downloads/{token}/install")
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "NewMod"
+    assert client.get("/api/downloads/pending").json() == []  # consumed
+
+
+def test_install_pending_download_unknown_token_returns_404(client):
+    response = client.post("/api/downloads/does-not-exist/install")
+
+    assert response.status_code == 404
+
+
+def test_replace_pending_download_replaces_existing_mod(app, client, app_config, conn, tmp_path):
+    mod_id = mod_manager.install(
+        _write_zip(tmp_path / "source.zip", "old.package"),
+        config=app_config, conn=conn, mod_name="Cool Mod",
+    )
+    archive = _write_zip(tmp_path / "CoolModV2.zip", "new.package")
+    app.state.report_download(archive)
+    token = client.get("/api/downloads/pending").json()[0]["token"]
+
+    response = client.post(f"/api/downloads/{token}/replace", json={"mod_id": mod_id})
+
+    assert response.status_code == 200
+    row = conn.execute("SELECT * FROM mods WHERE id = ?", (response.json()["id"],)).fetchone()
+    assert (Path(row["library_path"]) / "new.package").is_file()
+    assert not (Path(row["library_path"]) / "old.package").exists()
+
+
+def test_dismiss_pending_download_removes_without_installing(app, client, tmp_path):
+    archive = _write_zip(tmp_path / "NewMod.zip", "new.package")
+    app.state.report_download(archive)
+    token = client.get("/api/downloads/pending").json()[0]["token"]
+
+    response = client.post(f"/api/downloads/{token}/dismiss")
+
+    assert response.status_code == 200
+    assert client.get("/api/downloads/pending").json() == []
+    assert client.get("/api/mods").json() == []  # never installed

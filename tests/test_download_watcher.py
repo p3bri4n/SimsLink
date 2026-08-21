@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-import download_watcher
-import mod_manager
+from backend import download_watcher
+from backend import mod_manager
 
 
 def _install_mod(app_config, conn, tmp_path, name="Cool Mod", filename="mymod.package") -> str:

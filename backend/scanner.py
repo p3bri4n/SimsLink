@@ -12,8 +12,8 @@ from typing import Callable
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-import mod_manager
-from config import Config
+from . import mod_manager
+from .config import Config
 
 
 @dataclass(frozen=True)

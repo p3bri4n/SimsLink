@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-import mod_manager
+from backend import mod_manager
 
 
 def make_zip(tmp_path: Path, name: str, files: dict[str, bytes]) -> Path:

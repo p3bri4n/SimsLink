@@ -15,7 +15,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import Config
+from .config import Config
 
 # "Clear contents, keep the folder" targets preserve any FileCache.cfg/.ini.
 _PRESERVE_IN_CACHE_DIR = {"filecache.cfg", "filecache.ini"}

@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-import dependencies as deps
-import mod_manager
-import package_parser as pp
+from backend import dependencies as deps
+from backend import mod_manager
+from backend import package_parser as pp
 
 
 def _install_mod(app_config, conn, tmp_path, name, filename="mymod.package", content=b"data"):

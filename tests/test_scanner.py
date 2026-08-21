@@ -4,8 +4,8 @@ import time
 import zipfile
 from pathlib import Path
 
-import mod_manager
-import scanner
+from backend import mod_manager
+from backend import scanner
 
 
 def _install_one_file_mod(app_config, conn, tmp_path, filename="mymod.package", content=b"data"):

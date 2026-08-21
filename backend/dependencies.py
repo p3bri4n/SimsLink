@@ -29,7 +29,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-import package_parser
+from . import package_parser
 
 DEPENDENCY_TYPES = ("required", "optional", "translation")
 CONFIDENCE_LEVELS = ("confirmed", "suggested")

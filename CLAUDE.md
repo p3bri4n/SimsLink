@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
-**SimsLink** — a desktop mod manager for The Sims 4 on Linux, written in Python (a FastAPI backend serving a local REST API, an HTML/CSS/JS frontend, both wrapped in a native window via pywebview) with a local SQLite database. There is no official CurseForge client for Linux; this project fills that gap. Its main differentiator is automated crash diagnosis: parsing the game's `lastException.txt` to identify which installed mod likely caused a crash.
+**SimsLink** — a desktop mod manager for The Sims 4 on Linux: a FastAPI backend serving a local REST API, an HTML/CSS/JS frontend, both wrapped in a native window via pywebview, with a local SQLite database. There is no official CurseForge client for Linux; this project fills that gap. Its main differentiator is automated crash diagnosis: parsing the game's `lastException.txt` to identify which installed mod likely caused a crash.
 
 Reference project (not a dependency, just prior art worth checking for ideas): [SimsForge](https://github.com/Teyk0o/simsforge) — different stack (TS/Express/Prisma), notable for its filesystem import flow and malicious-mod flagging.
 
@@ -17,7 +17,7 @@ Reference project (not a dependency, just prior art worth checking for ideas): [
 ## Tech stack
 
 - Python 3.11+
-- FastAPI — local REST API (`localhost:8000`) hosting all business logic (DB, scanner, mod_manager, crash_analyzer, package_parser, curseforge client). The logic itself doesn't change from a Flet-based build — only how the UI reaches it (HTTP instead of direct Python calls).
+- FastAPI — local REST API (`localhost:8000`) hosting all business logic (DB, scanner, mod_manager, crash_analyzer, package_parser, curseforge client).
 - pywebview — wraps the frontend in a real native desktop window, not a browser tab. Linux system deps: `python3-gi` + `gir1.2-webkit2-4.0` (WebKitGTK).
 - Frontend: HTML/CSS/JS (vanilla by default; React only if a view's component complexity actually justifies it) — talks to the backend via `fetch`.
 - SQLite (local DB, no server component)
@@ -39,7 +39,7 @@ The Sims 4 loads mods from `Documents/Electronic Arts/The Sims 4/Mods/` with two
 
 ```
 backend/
-  main.py              # FastAPI app + routes — the only new module this migration adds
+  main.py              # FastAPI app + routes — thin HTTP layer over the modules below
   config.py             # .env loading
   db.py                 # SQLite schema + migrations
   curseforge.py         # CurseForge API client — Direct Mode only, requires CURSEFORGE_API_KEY
@@ -49,6 +49,7 @@ backend/
   package_parser.py       # DBPF (.package) header reader — resource listing, STBL comparison
   scanner.py               # incremental scan (metadata) + on-demand full scan (hashing)
   crash_analyzer.py        # lastException.txt parsing + automated bisection
+  cache_cleaner.py         # cache cleanup targets
 frontend/
   index.html
   style.css
@@ -56,10 +57,10 @@ frontend/
   i18n/
     fr.json
     en.json            # UI strings only, loaded and injected client-side
-desktop.py              # launches FastAPI (thread/subprocess) + opens the pywebview window
+desktop.py              # launches FastAPI (background thread) + opens the pywebview window
 ```
 
-`backend/*.py` (everything except `main.py`) keeps its internal logic unchanged by this migration — `main.py` exposes it over HTTP; the frontend calls those routes instead of a Flet view calling the module directly. When adding a feature, business logic still lives in the relevant `backend/` module; `main.py` should stay a thin routing layer over it, not grow feature logic of its own.
+`backend/*.py` (everything except `main.py`) is plain business logic, importable and testable on its own — `main.py` exposes it over HTTP, and the frontend calls those routes. Cross-module imports within `backend/` use relative imports (`from . import mod_manager`, `from .config import Config`, ...), since they're all part of the same package. When adding a feature, business logic goes in the relevant `backend/` module; `main.py` stays a thin routing layer over it, not a place to grow feature logic of its own.
 
 ### Library + symlink model
 
@@ -110,10 +111,12 @@ Do not gate core functionality behind having an API key. `curseforge.py` should 
 
 A full recursive hash scan on every launch is a real cost on large libraries (real-world example: 20k+ `.package` files). Implement accordingly:
 
-- On launch, the frontend renders the library immediately from a DB-backed route (`GET /mods` or equivalent) — no blocking "scanning..." screen. The backend must not make that route wait on a scan.
+- On launch, the frontend renders the library immediately from a DB-backed route (`GET /api/mods`) — no blocking "scanning..." screen. The backend must not make that route wait on a scan.
 - Incremental scan runs as a background task in the FastAPI process (not on the request thread handling the page load): compare size + `mtime` per file against `mod_files`; only changed/new files get a full hash. Unchanged mod folders are skipped entirely.
 - A `watchdog`-based real-time watcher on `Mods/` catches external changes while the app is running, reducing the next startup scan to just catching up on changes made while the app was closed.
 - Full hash scan is manual-only (Settings → "Full scan"), parallelized across cores since hashing is CPU-bound.
+
+**Not yet wired up**: `scanner.py` has both the incremental/full scan functions and a `ModsFolderWatcher` class, but neither `desktop.py` nor `backend/main.py` starts the real-time watcher yet, and there's no "Full scan" trigger in the Settings view (`/api/settings` is read-only so far). Both are still open work, not just documentation of a finished behavior.
 
 ## Database schema (SQLite)
 
@@ -185,6 +188,7 @@ No dedicated "translation" relation type exists in the CurseForge API (only `emb
 2. Name/slug heuristics (`[FR]`, `- French Translation`, `_VF`) — weak, pre-filter only.
 3. `.package` binary analysis via `package_parser.py`: check the file is STBL-only (no `.ts4script`, unusually small), compare STBL Group ID/Instance ID against the candidate source mod — strong confirmation, but on-demand only, never a full-library scan.
 - **Every suggested link requires user confirmation.** Store `confidence` as `confirmed` or `suggested` — never silently create a `translation` dependency.
+- **Not yet surfaced in either API or frontend** — `dependencies.py` implements detection and confirm/reject, but nothing in `backend/main.py` exposes it yet. `mod_manager.enable()` does already block on unresolved `required` dependencies (see below), so that half is live.
 
 ### Dependency resolution
 Track `required` / `optional` / `translation` dependency types. Block install/enable only on unresolved `required` dependencies; warn but don't block on `optional`.
@@ -204,8 +208,8 @@ Track `required` / `optional` / `translation` dependency types. Block install/en
 Unit tests and regression tests are mandatory for this project, not optional. Every module listed under Architecture should have corresponding tests, and every bug fix should come with a regression test that would have caught it.
 
 - Framework: `pytest`.
-- Test files mirror the module structure: `tests/test_<module>.py` for each file under `backend/` (e.g. `tests/test_mod_manager.py`, `tests/test_scanner.py`). This didn't change with the FastAPI migration — business-logic modules are tested directly, the same way they were called directly from Flet views before; route-level tests (below) are additive, not a replacement.
-- `backend/main.py`'s routes get their own tests via FastAPI's `TestClient` — no real HTTP server, no browser needed. A route test should stay thin: assert the route calls the right module function with the right arguments and translates its result/errors into the right HTTP status/JSON, not re-test business logic already covered at the module level.
+- Test files mirror the module structure: `tests/test_<module>.py` for each file under `backend/` (e.g. `tests/test_mod_manager.py`, `tests/test_scanner.py`) — business-logic modules are tested directly, independent of the HTTP layer.
+- `backend/main.py`'s routes get their own tests in `tests/test_backend_main.py`, via FastAPI's `TestClient` — no real HTTP server, no browser needed. A route test should stay thin: assert the route calls the right module function with the right arguments and translates its result/errors into the right HTTP status/JSON, not re-test business logic already covered at the module level. `create_app(config, db_path=...)` takes an explicit `db_path` for exactly this reason — it lets tests point the app at an isolated tmp_path database instead of `config.db_path`'s real, fixed XDG location.
 - Frontend (`frontend/app.js` or `src/`): no test framework mandated by default given the project's current size — plain vanilla JS driving `fetch` calls against already-tested routes doesn't carry much regression risk on its own. Revisit this (e.g. Vitest + React Testing Library) if/when a view's client-side state logic grows non-trivial enough that a bug there wouldn't be caught by backend tests.
 - **Priority modules for thorough coverage** — these encode the game's undocumented behavior and are the easiest place for silent regressions to slip in:
   - `mod_manager.py`: the `.ts4script` depth rule and the `Mods/<mod_id>/` placement rule must have explicit tests that assert installation fails/corrects itself when a script mod would land deeper than one level, and that `.package` files at any depth are accepted.
@@ -213,7 +217,7 @@ Unit tests and regression tests are mandatory for this project, not optional. Ev
   - `crash_analyzer.py`: traceback parsing needs fixture `lastException.txt` samples (both "mod path directly in trace" and "core game code only" cases) with known expected suspect output. Also test that a single occurrence never produces an auto-delete suggestion.
   - `dependencies.py`: translation-detection heuristics need fixtures per signal type (description match, name heuristic, STBL comparison) with assertions on the resulting `confidence` value — a `suggested` link must never silently become `confirmed` without explicit user action in the code path.
   - `package_parser.py`: DBPF header parsing needs at least one real `.package` fixture (a small STBL-only file and a mixed-resource file) to catch parser regressions against the binary format.
-- **Mode-dependent code** (`curseforge.py` vs `download_watcher.py`): tests must run without a real API key or network access — mock the CurseForge API client entirely, and mock filesystem events for the download watcher (no real file I/O against a live Downloads folder in CI).
+- **Mode-dependent code** (`curseforge.py`, `download_watcher.py`, and `backend/main.py`'s Direct-Mode-only routes): tests must run without a real API key or network access — mock the CurseForge API client entirely (`tests/test_backend_main.py` does this via `monkeypatch.setattr("backend.main.curseforge.CurseForgeClient", ...)`), and mock filesystem events for the download watcher (no real file I/O against a live Downloads folder in CI).
 - **Regression tests**: whenever a bug is fixed, add a test reproducing the original failure before the fix, named to reference the issue (e.g. `test_regression_ts4script_nested_two_levels`).
 - Run the full suite before considering any feature "done" — this applies to Claude Code's own workflow in this repo, not just to human review.
 
@@ -223,15 +227,9 @@ Once the above testing expectations are met, follow the collaboration pattern th
 
 ## Current project status
 
-- **Stack migration — feature-complete on the new stack as of 2026-08-21, cutover not yet decided.** All five views (Library, Catalog, Updates, Crash Mode, Settings) now exist in `backend/main.py` (FastAPI routes) + `frontend/` (`index.html`/`style.css`/`app.js`/`i18n/`) + `desktop.py` (pywebview entry point), reaching functional parity with the Flet app. Business logic is unaffected throughout — this was a presentation-layer swap only. Visual design follows `simslink-mockup.html`.
-  - **Library**: list, detail with dependencies/files, enable/disable, delete, open-folder.
-  - **Catalog**: `/api/catalog/search` + `/api/catalog/{curseforge_mod_id}/install` (Direct Mode only, 400 otherwise; Assisted Mode gets `catalog.assisted_mode_notice` client-side). `/api/open-external` (http/https-only, `webbrowser.open` — never navigates the pywebview window itself) backs "Open on CurseForge" wherever a mod disallows third-party distribution.
-  - **Updates**: `/api/updates/checklist` (Assisted Mode manual list) and `/api/updates/check` + `/api/updates/{mod_id}/apply` (Direct Mode, on-demand only — never eager, since checking is a network call per linked mod).
-  - **Crash Mode**: `/api/crash/analyze`, `/api/crash/{id}/bisection/start`, `/api/crash/{id}/bisection/report`, `/api/crash/{id}/confirm-faulty`, `/api/cache/targets`, `/api/cache/clean` — confirmation for both delete-mod and clear-cache now goes through one shared modal (`openConfirmModal()` in `app.js`).
-  - **Settings**: `/api/settings` (read-only folder paths) + a client-side-only language switch (no persistence yet, same limitation the Flet `ui/settings.py` had — Phase 6 in the brief).
-  - The frontend is a client-side view switcher (`switchView()` in `app.js`) across `#view-{library,catalog,updates,crash,settings}`; all five nav items are wired (`data-view` set on each).
-  - Tests: `tests/test_backend_main.py` (~32 route tests) via FastAPI's `TestClient`, mocking `curseforge.CurseForgeClient` the same way `tests/test_curseforge.py`/`tests/test_main.py` already do — no network access or real API key required.
-  - `mod_manager.py`, `scanner.py`, `db.py`, `dependencies.py`, `package_parser.py`, `crash_analyzer.py`, `curseforge.py`, `download_watcher.py`, `cache_cleaner.py`, `config.py` still live at the project root (not yet physically moved under `backend/` — `backend/main.py` imports them directly, which works because `desktop.py`, the process entry point, also lives at the project root and puts it on `sys.path`).
-  - **Not yet done, and needs an explicit decision before proceeding** (this is a destructive/hard-to-reverse step, not a routine one): the physical module move into `backend/`, and removing the Flet app (`ui/*.py`, the root `main.py`, `i18n/`, their tests, the `flet`/`simslink` script entries in `pyproject.toml`) now that the new stack has parity. Until that's decided, `ui/*.py` remains a second, still-working implementation — don't build new Flet UI on top of it, but don't delete it unasked either.
-- No CurseForge API key yet — build and test everything through Assisted Mode first (`download_watcher.py` + manual install/update flow). `curseforge.py` is the only module blocked on key approval.
-- Full technical brief with rationale and research notes: see `brief-sims4-mod-manager.md` in the project root for the complete spec this file summarizes.
+- **FastAPI + pywebview is the app, as of 2026-08-21.** The prior Flet UI (`ui/*.py`, root `main.py`, `i18n/`) has been removed — `backend/` + `frontend/` + `desktop.py` (`simslink` script entry) is the only implementation now, covering all five views (Library, Catalog, Updates, Crash Mode, Settings). Visual design follows `simslink-mockup.html`. All business-logic modules physically moved under `backend/` in the same change (cross-module imports are now relative — `from . import mod_manager`, etc.); watch for this if grepping old commits/notes for bare `import mod_manager`-style imports, which no longer resolve.
+- **Assisted Mode download detection — closed 2026-08-21.** `backend/main.py`'s `create_app()` builds a `download_watcher.DownloadWatcher` and a `PendingDownloadStore` (in-memory, lock-protected — written to by the watcher's background thread via `report_download()`, read/drained by request threads) but does not start the watcher itself, so building the app has no filesystem side effect; `desktop.py` calls `app.state.download_watcher.start()`/`.stop()` around the pywebview window's lifecycle. Routes: `GET /api/downloads/pending`, `POST /api/downloads/{token}/install`, `POST /api/downloads/{token}/replace`, `POST /api/downloads/{token}/dismiss`. The frontend polls `/api/downloads/pending` every 3s (`startDownloadPolling()` in `app.js`, no SSE/WebSocket — plain polling is fine for a single-user local app, no sub-second latency need) and shows `#downloadOverlay` when something's waiting, mirroring the old Flet dialog's Install/Replace/Dismiss choices. Tests call `app.state.report_download(path)` directly to simulate a detection with no real watcher thread involved.
+- The `Mods/` real-time watcher (`scanner.ModsFolderWatcher`) is a **separate, still-open gap** — not started anywhere, no route/UI for it. Same for a Settings UI to trigger a manual full scan, and for reviewing/confirming suggested translation dependencies (see "Translation-mod detection" above) — `dependencies.py`'s detection/confirm/reject functions have no API route at all yet.
+- **Regression caught by the backend/ move, now fixed**: `config.py`'s `DEFAULT_ENV_PATH` was `Path(__file__).resolve().parent / ".env"`, which — once `config.py` lives in `backend/` instead of the project root — silently resolved to `backend/.env` instead of the real `.env`. Fixed to `.parent.parent`; see `tests/test_config.py::test_regression_default_env_path_resolves_to_project_root_not_backend_dir`. Worth remembering as a category: any other `Path(__file__)`-relative path assumption written before the move should be double-checked the same way.
+- No CurseForge API key yet — build and test everything through Assisted Mode first (now fully working end-to-end, including install). `curseforge.py` is the only module blocked on key approval.
+- `brief-sims4-mod-manager.md` (the detailed spec this file summarizes) still describes the old Flet-based design (its "6. Vues Flet" section, in particular) — it hasn't been updated for the FastAPI/pywebview stack yet, so treat this file as authoritative wherever the two disagree.

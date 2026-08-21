@@ -180,6 +180,22 @@
   </div>
 </div>
 
+<!-- Assisted Mode: shown when polling /api/downloads/pending finds a newly
+     detected file in the download folder. Separate from #confirmOverlay
+     since this one needs up to three actions (dismiss/replace/install),
+     not one. -->
+<div class="confirm-overlay" id="downloadOverlay">
+  <div class="confirm-modal">
+    <h3 id="downloadTitle">—</h3>
+    <p id="downloadMessage">—</p>
+    <div class="confirm-actions">
+      <button class="btn" id="downloadDismissBtn">—</button>
+      <button class="btn" id="downloadReplaceBtn" hidden>—</button>
+      <button class="btn primary" id="downloadInstallBtn">—</button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

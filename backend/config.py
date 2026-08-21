@@ -19,10 +19,11 @@ REQUIRED_VARS = (
 
 DEFAULT_DOWNLOAD_WATCH_DIR = Path.home() / "Downloads"
 
-# Resolved next to this file (the project root), not the process's cwd — cwd
-# varies depending on how the app is launched (e.g. `flet run` doesn't
-# guarantee it matches the directory .env was created in).
-DEFAULT_ENV_PATH = Path(__file__).resolve().parent / ".env"
+# Resolved next to the project root (one level up from this file, which
+# lives in backend/), not the process's cwd — cwd varies depending on how
+# the app is launched and doesn't reliably match the directory .env was
+# created in.
+DEFAULT_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 # The SQLite DB isn't user-configurable — it's app state, not a mod library
 # concern — so it lives in the standard XDG data location, not LIBRARY_DIR.

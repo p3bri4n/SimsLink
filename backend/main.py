@@ -1,22 +1,18 @@
-"""FastAPI backend — Flet-to-FastAPI/pywebview migration (see CLAUDE.md's
-"Architecture" and "Current project status"). All five views (Library,
-Catalog, Updates, Crash Mode, Settings) are wired up here now; `ui/*.py`
-(Flet) is kept only until the cutover (removing it) is confirmed.
+"""FastAPI backend — SimsLink's application layer (see CLAUDE.md's
+"Architecture"). All five views (Library, Catalog, Updates, Crash Mode,
+Settings) are wired up here.
 
 Serves `frontend/` as static files too, so the whole app is reachable at
 http://localhost:8000/ with a single origin — no CORS needed. Everything
 under /api/ is JSON; every other path falls through to the static mount.
 
-Business logic is untouched by this migration: this module only translates
-HTTP <-> the existing mod_manager.py/dependencies.py/db.py/config.py, which
-still live at the project root (not yet moved under backend/, see CLAUDE.md)
-and are importable here because desktop.py — the process entry point — also
-lives at the project root, putting it on sys.path for the whole process.
+This module only translates HTTP <-> the business-logic modules in this same
+package (mod_manager.py/dependencies.py/db.py/config.py/...); it stays a
+thin routing layer and shouldn't grow feature logic of its own.
 
 `create_app()` takes a `Config` instead of resolving one from the
 environment at import time, specifically so tests can build an app against a
-throwaway temp Config/DB via FastAPI's TestClient, the same way the Flet
-`main.py` defers `Config.from_env()` into `main(page)` for testability.
+throwaway temp Config/DB via FastAPI's TestClient.
 """
 
 from __future__ import annotations
@@ -25,6 +21,8 @@ import json
 import subprocess
 import sqlite3
 import tempfile
+import threading
+import uuid
 import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -33,14 +31,14 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-import cache_cleaner
-import crash_analyzer
-import curseforge
-import db
-import dependencies
-import download_watcher
-import mod_manager
-from config import Config
+from . import cache_cleaner
+from . import crash_analyzer
+from . import curseforge
+from . import db
+from . import dependencies
+from . import download_watcher
+from . import mod_manager
+from .config import Config
 
 APP_VERSION = "0.1.0"  # keep in sync with pyproject.toml's [project].version
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -58,6 +56,46 @@ class ConfirmFaultyRequest(BaseModel):
     mod_id: str
 
 
+class ReplaceDownloadRequest(BaseModel):
+    mod_id: str
+
+
+class PendingDownloadStore:
+    """In-memory queue of detected-but-unconfirmed downloads (Assisted
+    Mode). Written to by DownloadWatcher's background thread, read/drained
+    by FastAPI request threads — a plain dict would race, so every access
+    goes through the lock. Not persisted: if the app restarts mid-decision,
+    the file is still sitting in the download folder and gets re-detected
+    on the next watcher event (or the next start_watcher() call), so
+    nothing is lost."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._items: dict[str, dict] = {}
+
+    def add(self, path: Path, candidate_mod_id: str | None, candidate_mod_name: str | None) -> str:
+        token = uuid.uuid4().hex
+        with self._lock:
+            self._items[token] = {
+                "token": token,
+                "path": path,
+                "filename": path.name,
+                "candidate_mod_id": candidate_mod_id,
+                "candidate_mod_name": candidate_mod_name,
+            }
+        return token
+
+    def list(self) -> list[dict]:
+        # Never leak the raw filesystem path to the client — filename is all
+        # the frontend needs to render the dialog.
+        with self._lock:
+            return [{k: v for k, v in item.items() if k != "path"} for item in self._items.values()]
+
+    def pop(self, token: str) -> dict | None:
+        with self._lock:
+            return self._items.pop(token, None)
+
+
 def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
     """`db_path` defaults to `config.db_path` (the real, fixed XDG data
     location — see config.py) for production use. Tests override it to an
@@ -68,7 +106,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
     db.init_db(db_path)
 
     # Resolved once at app creation, not per-request — verify_key() is a
-    # network call. Mirrors main.py's (Flet) Direct/Assisted resolution.
+    # network call.
     direct_mode = False
     cf_client: curseforge.CurseForgeClient | None = None
     if config.has_api_key:
@@ -90,6 +128,30 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             yield conn
         finally:
             conn.close()
+
+    # Assisted Mode download detection. DownloadWatcher itself is built here
+    # (so it shares report_download's wiring) but never started here —
+    # starting a real watchdog Observer thread as a side effect of building
+    # the app would fire on every test that calls create_app(). desktop.py
+    # starts/stops app.state.download_watcher around the pywebview window's
+    # lifecycle instead; tests call app.state.report_download(path) directly
+    # to simulate a detection with no real filesystem watcher involved.
+    pending_downloads = PendingDownloadStore()
+
+    def report_download(path: Path) -> None:
+        # Runs on DownloadWatcher's own background thread in production —
+        # never touches the request-scoped `conn` dependency; opens its own
+        # short-lived connection instead (sqlite3 connections aren't safe to
+        # share across threads).
+        conn = db.connect(db_path)
+        try:
+            candidate_mod_id, candidate_mod_name = download_watcher.match_existing_mod(path, conn)
+        finally:
+            conn.close()
+        pending_downloads.add(path, candidate_mod_id, candidate_mod_name)
+
+    app.state.download_watcher = download_watcher.DownloadWatcher(config, report_download)
+    app.state.report_download = report_download
 
     def mod_summary(row: sqlite3.Row) -> dict:
         return {
@@ -203,6 +265,45 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             subprocess.Popen(["xdg-open", str(library_path)])  # best-effort, Linux-only
         return {"opened": str(library_path)}
 
+    # --- Assisted Mode download detection -----------------------------------------
+
+    @app.get("/api/downloads/pending")
+    def list_pending_downloads() -> list[dict]:
+        return pending_downloads.list()
+
+    def pop_pending_or_404(token: str) -> dict:
+        item = pending_downloads.pop(token)
+        if item is None:
+            raise HTTPException(status_code=404, detail=f"No pending download: {token}")
+        return item
+
+    @app.post("/api/downloads/{token}/install")
+    def install_pending_download(token: str, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        item = pop_pending_or_404(token)
+        try:
+            mod_id = download_watcher.confirm_install(item["path"], config=config, conn=conn)
+        except mod_manager.ModManagerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return mod_summary(get_mod_row(mod_id, conn))
+
+    @app.post("/api/downloads/{token}/replace")
+    def replace_pending_download(
+        token: str, payload: ReplaceDownloadRequest, conn: sqlite3.Connection = Depends(get_conn)
+    ) -> dict:
+        item = pop_pending_or_404(token)
+        try:
+            new_mod_id = download_watcher.confirm_replace(
+                item["path"], payload.mod_id, config=config, conn=conn
+            )
+        except (mod_manager.ModManagerError, download_watcher.DownloadWatcherError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return mod_summary(get_mod_row(new_mod_id, conn))
+
+    @app.post("/api/downloads/{token}/dismiss")
+    def dismiss_pending_download(token: str) -> dict:
+        pop_pending_or_404(token)
+        return {"dismissed": token}
+
     def build_metadata(
         curseforge_id: int, mod_info: curseforge.CurseForgeMod, latest: curseforge.CurseForgeFile
     ) -> mod_manager.ModMetadata:
@@ -228,7 +329,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
         # No compat_status here on purpose: CurseForge search results don't
         # carry game-version ranges (only a file listing does), so the
         # catalog can't classify compatibility until a specific file is
-        # picked at install time — same limitation ui/catalog.py (Flet) had.
+        # picked at install time.
         return {
             "mod_id": mod.mod_id,
             "name": mod.name,

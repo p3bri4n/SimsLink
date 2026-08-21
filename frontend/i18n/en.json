@@ -103,5 +103,14 @@
   "settings.folder.user_dir": "Sims 4 user directory",
   "settings.folder.library_dir": "Library directory",
   "settings.folder.download_watch_dir": "Download watch directory",
-  "settings.language_heading": "Language"
+  "settings.language_heading": "Language",
+
+  "downloads.detected_title": "New download detected",
+  "downloads.detected_message": "New file detected: {filename}. Install this mod?",
+  "downloads.detected_replace_message": "New file detected: {filename}. This looks like an update for '{mod_name}'. Replace it?",
+  "downloads.install_button": "Install",
+  "downloads.replace_button": "Replace",
+  "downloads.error": "Couldn't process that download: {error}",
+
+  "common.dismiss": "Dismiss"
 }

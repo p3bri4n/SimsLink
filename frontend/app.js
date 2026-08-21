@@ -1,8 +1,8 @@
-// SimsLink frontend — all five views (FastAPI + pywebview migration, see
-// CLAUDE.md). Talks to backend/main.py's /api/ routes; never hardcodes UI
-// text — everything user-facing goes through t(), backed by i18n/{en,fr}.json
-// (CLAUDE.md's i18n rule applies to JS just as much as it did to the old
-// Flet Python code).
+// SimsLink frontend — all five views (FastAPI + pywebview). Talks to
+// backend/main.py's /api/ routes; never hardcodes UI text — everything
+// user-facing goes through t(), backed by i18n/{en,fr}.json.
+
+const DOWNLOAD_POLL_INTERVAL_MS = 3000;
 
 const state = {
   mods: [],
@@ -15,6 +15,7 @@ const state = {
   updatesWired: false,
   crashWired: false,
   settingsWired: false,
+  currentPendingDownload: null,
 };
 
 function detectLang() {
@@ -779,6 +780,82 @@ async function doDelete(modId) {
   }
 }
 
+// --- Assisted Mode download detection -----------------------------------------------
+//
+// The backend's DownloadWatcher runs on its own background thread and just
+// queues what it finds (see backend/main.py's PendingDownloadStore) — there's
+// no push channel from a plain REST API to the frontend, so this polls
+// instead. A local single-user desktop app doesn't need sub-second latency
+// here; a few seconds is an imperceptible delay for "I just dropped a file
+// in my Downloads folder."
+
+function startDownloadPolling() {
+  checkPendingDownloads();
+  setInterval(checkPendingDownloads, DOWNLOAD_POLL_INTERVAL_MS);
+}
+
+async function checkPendingDownloads() {
+  if (state.currentPendingDownload) return; // already showing one — let the user decide first
+  if (document.getElementById("confirmOverlay").classList.contains("show")) return;
+  let items;
+  try {
+    items = await apiRequest("/api/downloads/pending");
+  } catch (err) {
+    return; // background poll — don't spam an error banner over a transient failure
+  }
+  if (items.length) showDownloadDialog(items[0]);
+}
+
+function showDownloadDialog(item) {
+  state.currentPendingDownload = item;
+  const replaceBtn = document.getElementById("downloadReplaceBtn");
+
+  if (item.candidate_mod_id) {
+    document.getElementById("downloadMessage").textContent = t("downloads.detected_replace_message", {
+      filename: item.filename,
+      mod_name: item.candidate_mod_name,
+    });
+    replaceBtn.hidden = false;
+    replaceBtn.textContent = t("downloads.replace_button");
+    replaceBtn.onclick = () => resolvePendingDownload(item.token, "replace", item.candidate_mod_id);
+  } else {
+    document.getElementById("downloadMessage").textContent = t("downloads.detected_message", {
+      filename: item.filename,
+    });
+    replaceBtn.hidden = true;
+  }
+
+  document.getElementById("downloadTitle").textContent = t("downloads.detected_title");
+  document.getElementById("downloadDismissBtn").textContent = t("common.dismiss");
+  document.getElementById("downloadInstallBtn").textContent = t("downloads.install_button");
+  document.getElementById("downloadDismissBtn").onclick = () => resolvePendingDownload(item.token, "dismiss");
+  document.getElementById("downloadInstallBtn").onclick = () => resolvePendingDownload(item.token, "install");
+  document.getElementById("downloadOverlay").classList.add("show");
+}
+
+async function resolvePendingDownload(token, action, modId) {
+  document.getElementById("downloadOverlay").classList.remove("show");
+  state.currentPendingDownload = null;
+  try {
+    if (action === "install") {
+      await apiRequest(`/api/downloads/${token}/install`, { method: "POST" });
+    } else if (action === "replace") {
+      await apiRequest(`/api/downloads/${token}/replace`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mod_id: modId }),
+      });
+    } else {
+      await apiRequest(`/api/downloads/${token}/dismiss`, { method: "POST" });
+      return;
+    }
+    await loadMods();
+    render();
+  } catch (err) {
+    showError("errorBanner", t("downloads.error", { error: err.message }));
+  }
+}
+
 // --- init ------------------------------------------------------------------------
 
 async function init() {
@@ -798,6 +875,8 @@ async function init() {
   } catch (err) {
     showError("errorBanner", t("library.action_error", { error: err.message }));
   }
+
+  startDownloadPolling();
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -1,4 +1,4 @@
-import cache_cleaner
+from backend import cache_cleaner
 
 
 def _touch_file(path, content=b"x"):

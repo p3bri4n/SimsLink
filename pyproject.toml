@@ -10,7 +10,6 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
-    "flet>=0.24",
     "watchdog>=4.0",
     "python-dotenv>=1.0",
     "requests>=2.31",
@@ -27,14 +26,11 @@ dev = [
 ]
 
 [project.scripts]
-simslink = "main:main"
-# Alongside the Flet entry point above during the FastAPI/pywebview migration
-# (see CLAUDE.md's "Current project status") — not yet the default.
-simslink-web = "desktop:main"
+simslink = "desktop:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
-include = ["*.py", "ui/*.py", "i18n/*.json", "backend/*.py", "frontend/**/*"]
+include = ["*.py", "backend/*.py", "frontend/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

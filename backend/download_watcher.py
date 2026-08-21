@@ -11,7 +11,8 @@ The watcher notifies on its own background thread (a watchdog observer
 thread), so it deliberately never touches the sqlite3 connection itself —
 sqlite3 connections aren't safe to use across threads. Callers should marshal
 match_existing_mod()/confirm_*() calls back onto whichever thread owns `conn`
-(e.g. Page.run_task() in a Flet app).
+(e.g. a FastAPI request handler, which gets its own connection per request —
+see backend/main.py's get_conn()).
 """
 
 from __future__ import annotations
@@ -27,8 +28,8 @@ from typing import Callable
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-import mod_manager
-from config import Config
+from . import mod_manager
+from .config import Config
 
 _WATCHED_EXTENSIONS = {".zip", ".package", ".ts4script"}
 _MATCH_CUTOFF = 0.6

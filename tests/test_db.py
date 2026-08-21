@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-import db
+from backend import db
 
 
 EXPECTED_TABLES = {

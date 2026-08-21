@@ -1,6 +1,6 @@
 import pytest
 
-import package_parser as pp
+from backend import package_parser as pp
 
 
 def test_read_package_lists_resources(tmp_path, dbpf_writer):

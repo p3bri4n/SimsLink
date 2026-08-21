@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-import crash_analyzer as ca
-import mod_manager
+from backend import crash_analyzer as ca
+from backend import mod_manager
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
