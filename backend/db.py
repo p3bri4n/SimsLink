@@ -124,7 +124,13 @@ LATEST_VERSION = MIGRATIONS[-1][0]
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    # check_same_thread=False: FastAPI/Starlette dispatch sync dependencies
+    # via anyio's worker thread pool, so a single request's __enter__ (this
+    # call), route handler, and __exit__ (conn.close()) can each land on a
+    # different pool thread even though they're always sequential, never
+    # concurrent, for a given connection. sqlite3's default same-thread
+    # check doesn't know that and raises regardless.
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
