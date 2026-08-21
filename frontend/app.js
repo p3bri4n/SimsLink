@@ -18,6 +18,7 @@ const state = {
   crashWired: false,
   settingsWired: false,
   currentPendingDownload: null,
+  updatableMods: [],
 };
 
 function detectLang() {
@@ -381,6 +382,7 @@ function initUpdatesView() {
     if (!state.updatesWired) {
       state.updatesWired = true;
       document.getElementById("updatesCheckButton").addEventListener("click", doCheckUpdates);
+      document.getElementById("updateAllButton").addEventListener("click", clickUpdateAll);
     }
     return;
   }
@@ -427,6 +429,7 @@ async function loadUpdatesChecklist() {
 
 async function doCheckUpdates() {
   const results = document.getElementById("updatesResults");
+  const updateAllButton = document.getElementById("updateAllButton");
   results.innerHTML = "";
   let items;
   try {
@@ -437,6 +440,7 @@ async function doCheckUpdates() {
   }
   if (!items.length) {
     results.appendChild(elementWithText("div", "empty-state", t("updates.empty_direct")));
+    updateAllButton.hidden = true;
     return;
   }
   const actionable = items.filter((i) => i.status === "update_available");
@@ -450,6 +454,9 @@ async function doCheckUpdates() {
       elementWithText("div", "empty-inline", t("updates.check_error", { error: `${item.name}: ${item.error}` }))
     )
   );
+
+  state.updatableMods = actionable.map((item) => ({ id: item.id, name: item.name }));
+  updateAllButton.hidden = actionable.length < 2; // one mod is already a single click away below
 }
 
 function buildUpdateRow(item) {
@@ -469,16 +476,55 @@ function buildUpdateRow(item) {
   return row;
 }
 
+async function applyUpdateForMod(modId) {
+  await apiRequest(`/api/updates/${encodeURIComponent(modId)}/apply`, { method: "POST" });
+}
+
 async function applyUpdate(modId, button) {
   button.disabled = true;
   try {
-    await apiRequest(`/api/updates/${encodeURIComponent(modId)}/apply`, { method: "POST" });
+    await applyUpdateForMod(modId);
     button.textContent = t("catalog.installed_label");
     await loadMods();
   } catch (err) {
     button.disabled = false;
     showError("updatesErrorBanner", t("updates.update_error", { error: err.message }));
   }
+}
+
+function clickUpdateAll() {
+  const updatable = state.updatableMods || [];
+  if (!updatable.length) return;
+  openConfirmModal({
+    title: t("updates.update_all_title"),
+    message: t("updates.update_all_message", { count: updatable.length }),
+    extraNodes: updatable.map((item) => elementWithText("div", "empty-inline", item.name)),
+    confirmLabel: t("updates.update_all_confirm"),
+    onConfirm: doUpdateAll,
+  });
+}
+
+async function doUpdateAll() {
+  closeConfirm();
+  const updatable = state.updatableMods || [];
+  const button = document.getElementById("updateAllButton");
+  button.disabled = true;
+
+  const failures = [];
+  for (const item of updatable) {
+    try {
+      await applyUpdateForMod(item.id);
+    } catch (err) {
+      failures.push(`${item.name}: ${err.message}`);
+    }
+  }
+
+  button.disabled = false;
+  await loadMods();
+  if (failures.length) {
+    showError("updatesErrorBanner", t("updates.update_all_partial_error", { errors: failures.join("; ") }));
+  }
+  await doCheckUpdates(); // re-check: applied mods drop off, failures are re-offered
 }
 
 // --- crash mode view ---------------------------------------------------------------

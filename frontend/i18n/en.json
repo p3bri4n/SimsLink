@@ -89,6 +89,11 @@
   "updates.update_error": "Update failed: {error}",
   "updates.check_error": "Update check failed: {error}",
   "updates.check_on_curseforge_button": "Check on CurseForge",
+  "updates.update_all_button": "Update all",
+  "updates.update_all_title": "Update all mods?",
+  "updates.update_all_message": "This will update {count} mods, backing up each one's current version first:",
+  "updates.update_all_confirm": "Update all",
+  "updates.update_all_partial_error": "Some updates failed: {errors}",
 
   "crash.title": "Crash Mode",
   "crash.subtitle": "Diagnose the last crash and clean up stale cache.",
