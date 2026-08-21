@@ -96,6 +96,42 @@ def test_install_mixed_type_mod(app_config, conn, tmp_path):
     assert row["primary_type"] == "mixed"
 
 
+def test_install_stores_curseforge_metadata_when_provided(app_config, conn, tmp_path):
+    archive = make_zip(tmp_path, "source.zip", {"mymod.package": b"data"})
+    metadata = mod_manager.ModMetadata(
+        curseforge_id=111,
+        author="SomeAuthor",
+        category="Gameplay",
+        installed_version="file_222",
+        compat_status="compatible",
+        short_description="Short",
+        full_description="Full",
+        thumbnail_url="https://example.com/thumb.png",
+        links='{"curseforge_url": "https://www.curseforge.com/sims4/mods/x"}',
+        game_version_min="1.90",
+        game_version_max="1.110",
+        third_party_distribution_allowed=True,
+    )
+
+    mod_id = mod_manager.install(archive, config=app_config, conn=conn, mod_name="X", metadata=metadata)
+
+    row = conn.execute("SELECT * FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["curseforge_id"] == 111
+    assert row["author"] == "SomeAuthor"
+    assert row["compat_status"] == "compatible"
+    assert row["third_party_distribution_allowed"] == 1
+
+
+def test_install_without_metadata_defaults_compat_status_unknown(app_config, conn, tmp_path):
+    archive = make_zip(tmp_path, "source.zip", {"mymod.package": b"data"})
+
+    mod_id = mod_manager.install(archive, config=app_config, conn=conn)
+
+    row = conn.execute("SELECT compat_status, curseforge_id FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["compat_status"] == "unknown"
+    assert row["curseforge_id"] is None
+
+
 def test_install_generates_unique_mod_id_on_name_collision(app_config, conn, tmp_path):
     archive1 = make_zip(tmp_path, "one.zip", {"mymod.package": b"a"})
     archive2 = make_zip(tmp_path, "two.zip", {"mymod.package": b"b"})

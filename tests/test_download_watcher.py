@@ -143,3 +143,27 @@ def test_confirm_replace_unknown_mod_raises(app_config, conn, tmp_path):
 
     with pytest.raises(download_watcher.DownloadWatcherError):
         download_watcher.confirm_replace(archive, "does-not-exist", config=app_config, conn=conn)
+
+
+def test_confirm_replace_carries_metadata_through(app_config, conn, tmp_path):
+    """Direct Mode's ui/updates.py passes fresh CurseForge metadata into a
+    replace so the updated row doesn't lose curseforge_id/compat_status —
+    without this the replace path (delete + plain install) would silently
+    drop it, since mod_manager.install() defaults metadata to empty."""
+    mod_id = _install_mod(app_config, conn, tmp_path, name="Cool Mod", filename="old.package")
+
+    archive = tmp_path / "CoolModV2.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("new.package", b"new-data")
+    metadata = mod_manager.ModMetadata(
+        curseforge_id=111, installed_version="222", compat_status="compatible"
+    )
+
+    new_mod_id = download_watcher.confirm_replace(
+        archive, mod_id, config=app_config, conn=conn, metadata=metadata
+    )
+
+    row = conn.execute("SELECT * FROM mods WHERE id = ?", (new_mod_id,)).fetchone()
+    assert row["curseforge_id"] == 111
+    assert row["installed_version"] == "222"
+    assert row["compat_status"] == "compatible"

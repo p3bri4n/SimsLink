@@ -72,17 +72,28 @@ def confirm_install(
     return mod_manager.install(path, config=config, conn=conn, mod_name=mod_name)
 
 
-def confirm_replace(path: Path, mod_id: str, *, config: Config, conn: sqlite3.Connection) -> str:
+def confirm_replace(
+    path: Path,
+    mod_id: str,
+    *,
+    config: Config,
+    conn: sqlite3.Connection,
+    metadata: mod_manager.ModMetadata | None = None,
+) -> str:
     """Replaces `mod_id` with this newly downloaded version, backing up the
     old library folder first. Call only after the user has confirmed via the
-    UI."""
+    UI. `metadata` lets Direct Mode callers (ui/updates.py) carry the fresh
+    CurseForge metadata through the replace — Assisted Mode callers omit it,
+    same as a plain install."""
     old_row = conn.execute("SELECT name, library_path FROM mods WHERE id = ?", (mod_id,)).fetchone()
     if old_row is None:
         raise DownloadWatcherError(f"No such mod: {mod_id}")
 
     _backup_library_folder(Path(old_row["library_path"]), config)
     mod_manager.delete(mod_id, config=config, conn=conn)
-    return mod_manager.install(path, config=config, conn=conn, mod_name=old_row["name"])
+    return mod_manager.install(
+        path, config=config, conn=conn, mod_name=old_row["name"], metadata=metadata or mod_manager.ModMetadata()
+    )
 
 
 class _DownloadEventHandler(FileSystemEventHandler):

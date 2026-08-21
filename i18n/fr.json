@@ -63,5 +63,26 @@
   "crash.clear_cache_title": "Vider le cache ?",
   "crash.clear_cache_nothing": "Rien à vider.",
   "crash.clear_cache_cancel": "Annuler",
-  "crash.clear_cache_confirm": "Vider"
+  "crash.clear_cache_confirm": "Vider",
+
+  "catalog.assisted_mode_notice": "La navigation dans le catalogue nécessite une clé API CurseForge valide. En Mode Assisté, parcourez les mods dans votre navigateur puis installez-les via la détection de téléchargement.",
+  "catalog.search_placeholder": "Rechercher des mods...",
+  "catalog.search_button": "Rechercher",
+  "catalog.no_results": "Aucun mod trouvé.",
+  "catalog.install_error": "Échec de l'installation : {error}",
+  "catalog.install_button": "Installer",
+  "catalog.open_on_curseforge_button": "Ouvrir sur CurseForge",
+  "catalog.compat_unknown": "Compatibilité inconnue",
+
+  "updates.direct_notice": "La vérification compare le fichier installé de chaque mod à la dernière version publiée sur CurseForge.",
+  "updates.assisted_notice": "La détection automatique des mises à jour n'est pas disponible en Mode Assisté. Ouvrez la page CurseForge d'un mod pour vérifier manuellement — un nouveau téléchargement sera détecté automatiquement par la surveillance du dossier de téléchargement.",
+  "updates.check_button": "Vérifier les mises à jour",
+  "updates.empty_direct": "Aucun mod lié à CurseForge n'est installé pour l'instant.",
+  "updates.empty_assisted": "Aucun mod installé n'a de lien CurseForge connu pour l'instant.",
+  "updates.no_updates": "Tout est à jour.",
+  "updates.update_available": "Mise à jour disponible",
+  "updates.update_button": "Mettre à jour",
+  "updates.update_error": "Échec de la mise à jour : {error}",
+  "updates.check_error": "Vérification impossible {error}",
+  "updates.check_on_curseforge_button": "Vérifier sur CurseForge"
 }

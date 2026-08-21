@@ -63,5 +63,26 @@
   "crash.clear_cache_title": "Clear cache?",
   "crash.clear_cache_nothing": "Nothing to clear.",
   "crash.clear_cache_cancel": "Cancel",
-  "crash.clear_cache_confirm": "Clear"
+  "crash.clear_cache_confirm": "Clear",
+
+  "catalog.assisted_mode_notice": "Catalog browsing requires a valid CurseForge API key. In Assisted Mode, browse mods in your web browser and install them via the download watcher instead.",
+  "catalog.search_placeholder": "Search mods...",
+  "catalog.search_button": "Search",
+  "catalog.no_results": "No mods found.",
+  "catalog.install_error": "Install failed: {error}",
+  "catalog.install_button": "Install",
+  "catalog.open_on_curseforge_button": "Open on CurseForge",
+  "catalog.compat_unknown": "Compatibility unknown",
+
+  "updates.direct_notice": "Checking compares each installed mod's file against the latest release CurseForge currently serves.",
+  "updates.assisted_notice": "Automatic update detection isn't available in Assisted Mode. Open a mod's CurseForge page to check manually — downloading a new version will be picked up automatically by the download watcher.",
+  "updates.check_button": "Check for updates",
+  "updates.empty_direct": "No CurseForge-linked mods installed yet.",
+  "updates.empty_assisted": "No installed mods have a known CurseForge link yet.",
+  "updates.no_updates": "Everything is up to date.",
+  "updates.update_available": "Update available",
+  "updates.update_button": "Update",
+  "updates.update_error": "Update failed: {error}",
+  "updates.check_error": "Couldn't check {error}",
+  "updates.check_on_curseforge_button": "Check on CurseForge"
 }

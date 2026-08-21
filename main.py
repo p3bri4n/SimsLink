@@ -6,14 +6,17 @@ import logging
 
 import flet as ft
 
+import curseforge
 import db
 import download_watcher
 import i18n
 import scanner
 from config import Config, ConfigError
+from ui import catalog as catalog_view
 from ui import crash_mode as crash_mode_view
 from ui import library as library_view
 from ui import settings as settings_view
+from ui import updates as updates_view
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("simslink")
@@ -35,6 +38,18 @@ def main(page: ft.Page) -> None:
     scanner.import_untracked_mods(config, conn)
     scanner.incremental_scan(config, conn)
 
+    # Resolved once at startup, not per-rebuild — verify_key() is a network
+    # call, and rebuild() also runs on every language switch. An invalid/expired
+    # key falls back to Assisted Mode rather than failing the app (see
+    # CurseForgeClient.verify_key() and CLAUDE.md's mode table).
+    cf_client: curseforge.CurseForgeClient | None = None
+    direct_mode = False
+    if config.has_api_key:
+        candidate = curseforge.CurseForgeClient(config.curseforge_api_key)
+        if candidate.verify_key():
+            cf_client = candidate
+            direct_mode = True
+
     state = {"language": i18n.detect_system_language()}
     body = ft.Container(expand=True)
 
@@ -43,17 +58,23 @@ def main(page: ft.Page) -> None:
         page.title = t("app.title")
 
         banner = ft.Container(
-            content=ft.Text(t("mode.direct_banner") if config.has_api_key else t("mode.assisted_banner")),
-            bgcolor=ft.Colors.GREEN_100 if config.has_api_key else ft.Colors.AMBER_100,
+            content=ft.Text(t("mode.direct_banner") if direct_mode else t("mode.assisted_banner")),
+            bgcolor=ft.Colors.GREEN_100 if direct_mode else ft.Colors.AMBER_100,
             padding=10,
         )
 
         library = library_view.build(config=config, conn=conn, page=page, t=t)
+        catalog_control = catalog_view.build(
+            config=config, conn=conn, page=page, t=t, client=cf_client, on_installed=rebuild
+        )
+        updates_control = updates_view.build(
+            config=config, conn=conn, page=page, t=t, client=cf_client, on_updated=rebuild
+        )
         crash_control = crash_mode_view.build(config=config, conn=conn, page=page, t=t)
         settings_control = settings_view.build(
             config=config, t=t, current_language=state["language"], on_language_change=set_language
         )
-        views = [library.control, crash_control, settings_control]
+        views = [library.control, catalog_control, updates_control, crash_control, settings_control]
         content_area = ft.Container(content=views[0], expand=True)
 
         def show(index: int) -> None:
@@ -63,8 +84,10 @@ def main(page: ft.Page) -> None:
         nav = ft.Row(
             controls=[
                 ft.TextButton(content=t("nav.library"), on_click=lambda e: show(0)),
-                ft.TextButton(content=t("nav.crash_mode"), on_click=lambda e: show(1)),
-                ft.TextButton(content=t("nav.settings"), on_click=lambda e: show(2)),
+                ft.TextButton(content=t("nav.catalog"), on_click=lambda e: show(1)),
+                ft.TextButton(content=t("nav.updates"), on_click=lambda e: show(2)),
+                ft.TextButton(content=t("nav.crash_mode"), on_click=lambda e: show(3)),
+                ft.TextButton(content=t("nav.settings"), on_click=lambda e: show(4)),
             ]
         )
 

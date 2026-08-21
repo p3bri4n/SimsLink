@@ -16,6 +16,7 @@ import flet as ft
 import pytest
 
 import config
+import curseforge
 import main
 
 
@@ -104,6 +105,54 @@ def test_main_shows_config_error_when_env_missing():
 
 def test_main_shows_assisted_mode_banner_with_no_api_key(monkeypatch, tmp_path):
     _set_env(monkeypatch, tmp_path)
+    page = FakePage()
+
+    main.main(page)
+    try:
+        banner_texts = [c.value for c in _iter(page.controls[0]) if isinstance(c, ft.Text)]
+        assert any("Assisted Mode" in t for t in banner_texts)
+    finally:
+        if page.on_disconnect is not None:
+            page.on_disconnect(None)
+
+
+class _FakeCurseForgeClient:
+    """Stands in for curseforge.CurseForgeClient so these tests never hit the
+    network — only verify_key()'s return value matters for main.py's mode
+    detection (see CLAUDE.md: mode-dependent code must be testable without a
+    real API key)."""
+
+    def __init__(self, api_key, *, valid: bool) -> None:
+        self.api_key = api_key
+        self._valid = valid
+
+    def verify_key(self) -> bool:
+        return self._valid
+
+
+def test_main_shows_direct_mode_banner_with_valid_api_key(monkeypatch, tmp_path):
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("CURSEFORGE_API_KEY", "a-valid-key")
+    monkeypatch.setattr(
+        curseforge, "CurseForgeClient", lambda api_key: _FakeCurseForgeClient(api_key, valid=True)
+    )
+    page = FakePage()
+
+    main.main(page)
+    try:
+        banner_texts = [c.value for c in _iter(page.controls[0]) if isinstance(c, ft.Text)]
+        assert any("Direct Mode" in t for t in banner_texts)
+    finally:
+        if page.on_disconnect is not None:
+            page.on_disconnect(None)
+
+
+def test_main_falls_back_to_assisted_mode_when_api_key_invalid(monkeypatch, tmp_path):
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("CURSEFORGE_API_KEY", "an-expired-key")
+    monkeypatch.setattr(
+        curseforge, "CurseForgeClient", lambda api_key: _FakeCurseForgeClient(api_key, valid=False)
+    )
     page = FakePage()
 
     main.main(page)

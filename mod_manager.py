@@ -39,6 +39,25 @@ class ModFile:
     extension: str
 
 
+@dataclass(frozen=True)
+class ModMetadata:
+    """Optional CurseForge-sourced metadata for an installed mod (Direct
+    Mode only — Assisted Mode installs simply leave these as None)."""
+
+    curseforge_id: int | None = None
+    author: str | None = None
+    category: str | None = None
+    installed_version: str | None = None
+    compat_status: str | None = None
+    short_description: str | None = None
+    full_description: str | None = None
+    thumbnail_url: str | None = None
+    links: str | None = None  # JSON-encoded
+    game_version_min: str | None = None
+    game_version_max: str | None = None
+    third_party_distribution_allowed: bool | None = None
+
+
 def hash_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as f:
@@ -158,6 +177,7 @@ def _finalize_install(
     config: Config,
     conn: sqlite3.Connection,
     *,
+    metadata: ModMetadata = ModMetadata(),
     after_copy: Callable[[], None] | None = None,
 ) -> str:
     library_path = config.library_dir / mod_id
@@ -165,10 +185,32 @@ def _finalize_install(
     try:
         destinations = _copy_mod_files(source_dir, library_path, files)
         primary_type = _determine_primary_type(files)
+        distribution_allowed = metadata.third_party_distribution_allowed
         conn.execute(
-            "INSERT INTO mods (id, name, library_path, primary_type, install_date, active) "
-            "VALUES (?, ?, ?, ?, ?, 1)",
-            (mod_id, name, str(library_path), primary_type, _now_iso()),
+            "INSERT INTO mods (id, name, library_path, primary_type, install_date, active, "
+            "curseforge_id, author, category, installed_version, compat_status, "
+            "short_description, full_description, thumbnail_url, links, "
+            "game_version_min, game_version_max, third_party_distribution_allowed) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                mod_id,
+                name,
+                str(library_path),
+                primary_type,
+                _now_iso(),
+                metadata.curseforge_id,
+                metadata.author,
+                metadata.category,
+                metadata.installed_version,
+                metadata.compat_status or "unknown",  # column is NOT NULL
+                metadata.short_description,
+                metadata.full_description,
+                metadata.thumbnail_url,
+                metadata.links,
+                metadata.game_version_min,
+                metadata.game_version_max,
+                None if distribution_allowed is None else int(distribution_allowed),
+            ),
         )
         _insert_mod_files(conn, mod_id, library_path, destinations)
         if after_copy is not None:
@@ -188,6 +230,7 @@ def install(
     config: Config,
     conn: sqlite3.Connection,
     mod_name: str | None = None,
+    metadata: ModMetadata = ModMetadata(),
 ) -> str:
     """Installs a mod from a .zip archive or a bare .package/.ts4script file.
 
@@ -199,7 +242,7 @@ def install(
             raise ModManagerError(f"No .package or .ts4script files found in {source}")
         name = mod_name or source.stem
         mod_id = generate_unique_mod_id(mod_name or source.stem, conn)
-        return _finalize_install(mod_id, staged_dir, files, name, config, conn)
+        return _finalize_install(mod_id, staged_dir, files, name, config, conn, metadata=metadata)
 
 
 def import_existing_folder(source_dir: Path, *, config: Config, conn: sqlite3.Connection) -> str:
