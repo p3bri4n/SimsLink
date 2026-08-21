@@ -98,6 +98,9 @@
   "updates.update_all_confirm": "Update all",
   "updates.update_all_partial_error": "Some updates failed: {errors}",
 
+  "cache.suggest_title": "Clear stale cache?",
+  "cache.suggest_message": "Mod changes can leave stale cache entries behind, which can themselves cause crashes. Clear now?",
+
   "crash.title": "Crash Mode",
   "crash.subtitle": "Diagnose the last crash and clean up stale cache.",
   "crash.analyze_button": "I crashed",
@@ -133,6 +136,10 @@
   "settings.folder.download_watch_dir": "Download watch directory",
   "settings.language_heading": "Language",
   "settings.scan_heading": "Scan",
+  "settings.mods_watcher_label": "Real-time Mods/ watcher",
+  "settings.mods_watcher_enabled": "Enabled",
+  "settings.mods_watcher_disabled": "Disabled",
+  "settings.mods_watcher_notice": "Set via MODS_WATCHER_ENABLED in .env — catches mods added/removed outside SimsLink while it's running.",
   "settings.full_scan_notice": "Recomputes every file hash — can take a while on large libraries.",
   "settings.full_scan_button": "Full scan",
   "settings.full_scan_running": "Scanning…",

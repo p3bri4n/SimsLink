@@ -14,6 +14,7 @@ ALL_ENV_VARS = (
     "DOWNLOAD_WATCH_DIR",
     "GAME_VERSION",
     "BACKUP_RETENTION_COUNT",
+    "MODS_WATCHER_ENABLED",
 )
 
 
@@ -102,6 +103,35 @@ def test_from_env_backup_retention_count_rejects_non_numeric(tmp_path):
 
 def test_from_env_backup_retention_count_rejects_zero(tmp_path):
     env_path = write_env_file(tmp_path, BACKUP_RETENTION_COUNT="0")
+
+    with pytest.raises(ConfigError):
+        Config.from_env(env_path)
+
+
+def test_from_env_mods_watcher_enabled_defaults_true_when_unset(tmp_path):
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.mods_watcher_enabled is True
+
+
+def test_from_env_mods_watcher_enabled_can_be_disabled(tmp_path):
+    env_path = write_env_file(tmp_path, MODS_WATCHER_ENABLED="false")
+
+    config = Config.from_env(env_path)
+
+    assert config.mods_watcher_enabled is False
+
+
+def test_from_env_mods_watcher_enabled_accepts_various_truthy_spellings(tmp_path):
+    for spelling in ("1", "true", "True", "yes", "on"):
+        env_path = write_env_file(tmp_path, MODS_WATCHER_ENABLED=spelling)
+        assert Config.from_env(env_path).mods_watcher_enabled is True, spelling
+
+
+def test_from_env_mods_watcher_enabled_rejects_unrecognized_value(tmp_path):
+    env_path = write_env_file(tmp_path, MODS_WATCHER_ENABLED="maybe")
 
     with pytest.raises(ConfigError):
         Config.from_env(env_path)

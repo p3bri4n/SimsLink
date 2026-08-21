@@ -677,6 +677,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             "library_dir": str(config.library_dir),
             "download_watch_dir": str(config.download_watch_dir),
             "backup_retention_count": config.backup_retention_count,
+            "mods_watcher_enabled": config.mods_watcher_enabled,
         }
 
     @app.post("/api/settings/full-scan")

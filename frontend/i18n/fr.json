@@ -98,6 +98,9 @@
   "updates.update_all_confirm": "Tout mettre à jour",
   "updates.update_all_partial_error": "Certaines mises à jour ont échoué : {errors}",
 
+  "cache.suggest_title": "Vider le cache obsolète ?",
+  "cache.suggest_message": "Les changements de mods peuvent laisser des entrées de cache obsolètes, qui peuvent elles-mêmes provoquer des crashs. Vider maintenant ?",
+
   "crash.title": "Mode Crash",
   "crash.subtitle": "Diagnostiquez le dernier crash et nettoyez le cache obsolète.",
   "crash.analyze_button": "J'ai crashé",
@@ -133,6 +136,10 @@
   "settings.folder.download_watch_dir": "Dossier de téléchargement surveillé",
   "settings.language_heading": "Langue",
   "settings.scan_heading": "Scan",
+  "settings.mods_watcher_label": "Watcher temps réel Mods/",
+  "settings.mods_watcher_enabled": "Activé",
+  "settings.mods_watcher_disabled": "Désactivé",
+  "settings.mods_watcher_notice": "Défini via MODS_WATCHER_ENABLED dans .env — détecte les mods ajoutés/retirés en dehors de SimsLink pendant son exécution.",
   "settings.full_scan_notice": "Recalcule le hash de chaque fichier — peut prendre du temps sur une grosse bibliothèque.",
   "settings.full_scan_button": "Scan complet",
   "settings.full_scan_running": "Scan en cours…",

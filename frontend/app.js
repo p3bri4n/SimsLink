@@ -259,11 +259,16 @@ function buildCard(mod) {
 }
 
 async function toggleActive(mod) {
-  const endpoint = mod.active ? "disable" : "enable";
+  const wasActive = mod.active;
+  const endpoint = wasActive ? "disable" : "enable";
   try {
     await apiRequest(`/api/mods/${encodeURIComponent(mod.id)}/${endpoint}`, { method: "POST" });
     await loadMods();
     render();
+    // CLAUDE.md's Cache cleanup: suggest after install/update/disable — not
+    // enable, which isn't in that list (a newly-active mod isn't what left
+    // stale cache entries behind).
+    if (wasActive) await suggestCacheCleanup();
   } catch (err) {
     showError("errorBanner", t("library.action_error", { error: err.message }));
   }
@@ -374,6 +379,7 @@ async function installFromCatalog(mod, button) {
     await apiRequest(`/api/catalog/${mod.mod_id}/install`, { method: "POST" });
     button.textContent = t("catalog.installed_label");
     await loadMods();
+    await suggestCacheCleanup();
   } catch (err) {
     button.disabled = false;
     showError("catalogErrorBanner", t("catalog.install_error", { error: err.message }));
@@ -510,6 +516,7 @@ async function applyUpdate(modId, button) {
     await applyUpdateForMod(modId);
     button.textContent = t("catalog.installed_label");
     await loadMods();
+    await suggestCacheCleanup();
   } catch (err) {
     button.disabled = false;
     showError("updatesErrorBanner", t("updates.update_error", { error: err.message }));
@@ -548,6 +555,7 @@ async function doUpdateAll() {
   if (failures.length) {
     showError("updatesErrorBanner", t("updates.update_all_partial_error", { errors: failures.join("; ") }));
   }
+  if (failures.length < updatable.length) await suggestCacheCleanup(); // at least one succeeded
   await doCheckUpdates(); // re-check: applied mods drop off, failures are re-offered
 }
 
@@ -680,6 +688,12 @@ async function confirmFaulty(crashLogId, modId) {
   setCrashStatus(elementWithText("div", "empty-state", t("crash.faulty_confirmed", { name: modName(modId) })));
 }
 
+function buildCacheTargetNodes(targets) {
+  return targets.length
+    ? targets.map((tgt) => elementWithText("div", "empty-inline", `${tgt.name} — ${tgt.description}`))
+    : [elementWithText("div", "empty-inline", t("crash.clear_cache_nothing"))];
+}
+
 async function clickClearCache() {
   let targets;
   try {
@@ -688,12 +702,33 @@ async function clickClearCache() {
     showError("crashErrorBanner", t("crash.clear_cache_error", { error: err.message }));
     return;
   }
-  const extraNodes = targets.length
-    ? targets.map((tgt) => elementWithText("div", "empty-inline", `${tgt.name} — ${tgt.description}`))
-    : [elementWithText("div", "empty-inline", t("crash.clear_cache_nothing"))];
   openConfirmModal({
     title: t("crash.clear_cache_title"),
-    extraNodes,
+    extraNodes: buildCacheTargetNodes(targets),
+    confirmLabel: t("crash.clear_cache_confirm"),
+    onConfirm: doClearCache,
+  });
+}
+
+// CLAUDE.md's Cache cleanup: "Suggest cleanup automatically after
+// install/update/disable actions, but always require confirmation before
+// deleting" — reuses the exact same targets/confirm/clean flow as the
+// manual "Clear cache" button above, just triggered proactively. Stays
+// silent (no modal, no error banner) if the target list is empty or can't
+// be fetched — this is a courtesy suggestion, not the primary action the
+// user just took, so it should never be the thing that surfaces an error.
+async function suggestCacheCleanup() {
+  let targets;
+  try {
+    targets = await apiRequest("/api/cache/targets");
+  } catch (err) {
+    return;
+  }
+  if (!targets.length) return;
+  openConfirmModal({
+    title: t("cache.suggest_title"),
+    message: t("cache.suggest_message"),
+    extraNodes: buildCacheTargetNodes(targets),
     confirmLabel: t("crash.clear_cache_confirm"),
     onConfirm: doClearCache,
   });
@@ -771,6 +806,17 @@ async function loadSettings() {
     row.appendChild(elementWithText("span", "value", value));
     backupsContainer.appendChild(row);
   });
+
+  const watcherEl = document.getElementById("settingsModsWatcher");
+  watcherEl.innerHTML = "";
+  watcherEl.appendChild(elementWithText("span", null, t("settings.mods_watcher_label")));
+  watcherEl.appendChild(
+    elementWithText(
+      "span",
+      "value",
+      settings.mods_watcher_enabled ? t("settings.mods_watcher_enabled") : t("settings.mods_watcher_disabled")
+    )
+  );
 
   renderScriptModsSetting();
 }
@@ -1311,6 +1357,7 @@ async function resolvePendingDownload(token, action, modId) {
     }
     await loadMods();
     render();
+    await suggestCacheCleanup();
   } catch (err) {
     showError("errorBanner", t("downloads.error", { error: err.message }));
   }

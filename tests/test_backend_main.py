@@ -715,6 +715,7 @@ def test_get_settings_returns_configured_paths(app_config, client):
     assert body["mods_dir"] == str(app_config.sims4_mods_dir)
     assert body["library_dir"] == str(app_config.library_dir)
     assert body["backup_retention_count"] == app_config.backup_retention_count
+    assert body["mods_watcher_enabled"] == app_config.mods_watcher_enabled
 
 
 def test_full_scan_rehashes_and_reports_stats(app_config, conn, tmp_path, client):

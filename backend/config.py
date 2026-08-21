@@ -19,6 +19,10 @@ REQUIRED_VARS = (
 
 DEFAULT_DOWNLOAD_WATCH_DIR = Path.home() / "Downloads"
 DEFAULT_BACKUP_RETENTION_COUNT = 5
+DEFAULT_MODS_WATCHER_ENABLED = True
+
+_TRUTHY = {"1", "true", "yes", "on"}
+_FALSY = {"0", "false", "no", "off"}
 
 # Resolved next to the project root (one level up from this file, which
 # lives in backend/), not the process's cwd — cwd varies depending on how
@@ -45,6 +49,7 @@ class Config:
     download_watch_dir: Path
     game_version: str | None
     backup_retention_count: int = DEFAULT_BACKUP_RETENTION_COUNT
+    mods_watcher_enabled: bool = DEFAULT_MODS_WATCHER_ENABLED
 
     @property
     def has_api_key(self) -> bool:
@@ -75,6 +80,11 @@ class Config:
         game_version = values.get("GAME_VERSION", "").strip() or None
         api_key = values.get("CURSEFORGE_API_KEY", "").strip() or None
         backup_retention_count = _parse_backup_retention_count(values.get("BACKUP_RETENTION_COUNT", ""))
+        mods_watcher_enabled = _parse_bool(
+            values.get("MODS_WATCHER_ENABLED", ""),
+            default=DEFAULT_MODS_WATCHER_ENABLED,
+            var_name="MODS_WATCHER_ENABLED",
+        )
 
         return cls(
             sims4_game_dir=Path(values["SIMS4_GAME_DIR"]).expanduser(),
@@ -89,6 +99,7 @@ class Config:
             ),
             game_version=game_version,
             backup_retention_count=backup_retention_count,
+            mods_watcher_enabled=mods_watcher_enabled,
         )
 
 
@@ -103,6 +114,19 @@ def _parse_backup_retention_count(raw: str) -> int:
     if value < 1:
         raise ConfigError("BACKUP_RETENTION_COUNT must be at least 1")
     return value
+
+
+def _parse_bool(raw: str, *, default: bool, var_name: str) -> bool:
+    normalized = raw.strip().lower()
+    if not normalized:
+        return default
+    if normalized in _TRUTHY:
+        return True
+    if normalized in _FALSY:
+        return False
+    raise ConfigError(
+        f"{var_name} must be a boolean (1/0, true/false, yes/no, on/off), got: {raw!r}"
+    )
 
 
 def detect_symlink_support(directory: Path) -> bool:

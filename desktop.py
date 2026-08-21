@@ -45,16 +45,22 @@ def main() -> None:
     # changes under Mods/ — see backend/main.py's create_app() for why
     # neither is started there. The startup catch-up scan runs in its own
     # thread so it never delays opening the window (CLAUDE.md: "must never
-    # block the UI").
+    # block the UI"). The Mods/ watcher is the only one of the two that's
+    # user-configurable (MODS_WATCHER_ENABLED) — .stop() on a watcher that
+    # was never .start()ed raises (watchdog's Observer is a Thread; joining
+    # one that never started is an error), so the guard has to match on
+    # both ends, not just skip the start() call.
     app.state.download_watcher.start()
-    app.state.mods_watcher.start()
+    if config.mods_watcher_enabled:
+        app.state.mods_watcher.start()
     threading.Thread(target=app.state.run_startup_scan, daemon=True).start()
     try:
         webview.create_window("SimsLink", f"http://{HOST}:{PORT}/", width=1280, height=800, min_size=(960, 600))
         webview.start()
     finally:
         app.state.download_watcher.stop()
-        app.state.mods_watcher.stop()
+        if config.mods_watcher_enabled:
+            app.state.mods_watcher.stop()
         server.should_exit = True
 
 
