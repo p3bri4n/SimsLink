@@ -3,7 +3,7 @@ from backend import game_options
 
 def test_script_mods_allowed_true(app_config):
     (app_config.sims4_user_dir / "options.ini").write_text(
-        "[GraphicsSettings]\nscriptmodsallowed=1\n"
+        "[GraphicsSettings]\nscriptmodsenabled=1\n"
     )
 
     assert game_options.script_mods_allowed(app_config) is True
@@ -11,7 +11,7 @@ def test_script_mods_allowed_true(app_config):
 
 def test_script_mods_allowed_false(app_config):
     (app_config.sims4_user_dir / "options.ini").write_text(
-        "[GraphicsSettings]\nScriptModsAllowed=False\n"
+        "[GraphicsSettings]\nScriptModsEnabled=False\n"
     )
 
     assert game_options.script_mods_allowed(app_config) is False
@@ -28,7 +28,7 @@ def test_script_mods_allowed_none_when_key_missing(app_config):
 
 
 def test_script_mods_allowed_none_for_unrecognizable_value(app_config):
-    (app_config.sims4_user_dir / "options.ini").write_text("scriptmodsallowed=maybe\n")
+    (app_config.sims4_user_dir / "options.ini").write_text("scriptmodsenabled=maybe\n")
 
     assert game_options.script_mods_allowed(app_config) is None
 
@@ -37,7 +37,7 @@ def test_script_mods_allowed_ignores_section_name(app_config):
     # The key is matched regardless of which [Section] it sits under — the
     # real game's section naming isn't documented/guaranteed.
     (app_config.sims4_user_dir / "options.ini").write_text(
-        "[SomeOtherSection]\nscriptmodsallowed=true\n"
+        "[SomeOtherSection]\nscriptmodsenabled=true\n"
     )
 
     assert game_options.script_mods_allowed(app_config) is True
@@ -45,7 +45,18 @@ def test_script_mods_allowed_ignores_section_name(app_config):
 
 def test_script_mods_allowed_ignores_comments_and_blank_lines(app_config):
     (app_config.sims4_user_dir / "options.ini").write_text(
-        "; a comment\n\n[GraphicsSettings]\n\nscriptmodsallowed=1\n"
+        "; a comment\n\n[GraphicsSettings]\n\nscriptmodsenabled=1\n"
     )
 
     assert game_options.script_mods_allowed(app_config) is True
+
+
+def test_regression_key_is_scriptmodsenabled_not_scriptmodsallowed(app_config):
+    # SCRIPT_MODS_ALLOWED_KEY originally searched for "scriptmodsallowed", a
+    # guess based on the in-game setting's display name. A real options.ini
+    # confirmed the actual key the game writes is "scriptmodsenabled" — the
+    # old guess left the check permanently returning None (unknown) against
+    # a real file, even with the setting explicitly present.
+    (app_config.sims4_user_dir / "options.ini").write_text("scriptmodsallowed=1\n")
+
+    assert game_options.script_mods_allowed(app_config) is None

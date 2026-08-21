@@ -60,7 +60,7 @@ def test_status_reports_assisted_mode_without_api_key(client):
 
 
 def test_status_reports_script_mods_allowed(app_config, client):
-    (app_config.sims4_user_dir / "options.ini").write_text("scriptmodsallowed=1\n")
+    (app_config.sims4_user_dir / "options.ini").write_text("scriptmodsenabled=1\n")
 
     response = client.get("/api/status")
 

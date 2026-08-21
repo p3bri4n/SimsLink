@@ -9,6 +9,13 @@ regardless of section, matching the key case-insensitively.
 Currently checks one thing: "Script Mods Allowed" — without it, no
 .ts4script file loads at all, and the game gives no error message when that
 happens, making it a common source of "my script mods don't work" confusion.
+
+The actual ini key the game writes is `scriptmodsenabled`, not
+`scriptmodsallowed` — the latter was an initial guess based on the setting's
+display name in-game, confirmed wrong against a real options.ini. Function/
+route naming keeps "allowed" since that's the concept surfaced to the user
+(matches the in-game setting's label); only the key string searched for in
+the file changes.
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ _KV_RE = re.compile(r"^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$")
 _TRUTHY = {"1", "true", "yes", "on"}
 _FALSY = {"0", "false", "no", "off"}
 
-SCRIPT_MODS_ALLOWED_KEY = "scriptmodsallowed"
+SCRIPT_MODS_ALLOWED_KEY = "scriptmodsenabled"
 
 
 def _find_key(path: Path, key: str) -> str | None:
