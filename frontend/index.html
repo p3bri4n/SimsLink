@@ -46,6 +46,13 @@
 
       <div class="error-banner" id="errorBanner"></div>
 
+      <!-- Informational only — never blocks anything, see conflict_detector.py.
+           Hidden entirely when /api/conflicts comes back empty. -->
+      <div class="conflicts-banner" id="conflictsBanner" hidden>
+        <button class="conflicts-toggle" id="conflictsToggle" type="button"></button>
+        <div class="conflicts-list" id="conflictsList" hidden></div>
+      </div>
+
       <div class="grid" id="grid"></div>
     </section>
 
@@ -123,6 +130,12 @@
       <div class="detail-section">
         <h4 data-i18n="settings.folders_heading">Folders</h4>
         <div id="settingsFolders"></div>
+      </div>
+
+      <div class="detail-section">
+        <h4 data-i18n="settings.backups_heading">Backups</h4>
+        <div id="settingsBackups"></div>
+        <p class="sub" data-i18n="settings.backup_retention_notice">Set via BACKUP_RETENTION_COUNT in .env — a replaced mod's oldest backups beyond this count are purged automatically.</p>
       </div>
 
       <div class="detail-section">

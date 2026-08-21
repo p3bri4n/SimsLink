@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import cache_cleaner
+from . import conflict_detector
 from . import crash_analyzer
 from . import curseforge
 from . import db
@@ -254,6 +255,19 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
     def list_mods(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
         rows = conn.execute("SELECT * FROM mods ORDER BY name COLLATE NOCASE").fetchall()
         return [mod_summary(row) for row in rows]
+
+    @app.get("/api/conflicts")
+    def list_conflicts(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        # Purely informational (see conflict_detector.py) — resolves mod_ids
+        # to {id, name} here so the frontend never has to look them up itself.
+        results = []
+        for group in conflict_detector.find_conflicts(conn):
+            mods = []
+            for mod_id in group.mod_ids:
+                row = conn.execute("SELECT name FROM mods WHERE id = ?", (mod_id,)).fetchone()
+                mods.append({"id": mod_id, "name": row["name"] if row is not None else mod_id})
+            results.append({"kind": group.kind, "identifier": group.identifier, "mods": mods})
+        return results
 
     @app.get("/api/mods/{mod_id}")
     def get_mod(mod_id: str, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
@@ -585,6 +599,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             "user_dir": str(config.sims4_user_dir),
             "library_dir": str(config.library_dir),
             "download_watch_dir": str(config.download_watch_dir),
+            "backup_retention_count": config.backup_retention_count,
         }
 
     @app.post("/api/settings/full-scan")

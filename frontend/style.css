@@ -157,6 +157,27 @@ body {
 .empty-state { color: var(--text-dim); font-size: 13.5px; padding: 12px 2px; }
 .empty-inline { color: var(--text-faint); font-size: 12.5px; }
 
+/* ---------- Conflicts banner (Library) — not in the original mockup ---------- */
+.conflicts-banner {
+  background: var(--warn-glow);
+  border: 1px solid rgba(255,106,71,0.35);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.conflicts-toggle {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  background: none; border: none;
+  color: var(--warn);
+  font-family: var(--font-body); font-size: 13px; font-weight: 600;
+  cursor: pointer; text-align: left;
+}
+.conflicts-list { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 6px; }
+.conflicts-list .conflict-row { font-size: 12.5px; color: var(--text-dim); }
+.conflicts-list .conflict-row .kind { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); margin-right: 6px; }
+
 /* ---------- Catalog view — not in the original mockup ---------- */
 .search-row { display: flex; gap: 10px; margin-bottom: 18px; }
 .search-row .search-wrap.search-wrap--inline { width: auto; flex: 1; }

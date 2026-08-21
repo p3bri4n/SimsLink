@@ -1,6 +1,8 @@
+import dataclasses
 import threading
 import time
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -134,6 +136,54 @@ def test_confirm_replace_backs_up_old_version_and_reinstalls(app_config, conn, t
     assert (backups[0] / "old.package").is_file()
     assert (app_config.library_dir / mod_id / "new.package").is_file()
     assert not (app_config.library_dir / mod_id / "old.package").exists()
+
+
+class _FakeClock:
+    """Distinct, increasing timestamps per call — real time.sleep()s between
+    replaces would work too, but this is instant and just as deterministic.
+    Backup dirs are named "<mod_id>-<timestamp>"; two replaces landing on the
+    same wall-clock second would otherwise collide (shutil.copytree raising
+    FileExistsError)."""
+
+    _seconds = 0
+
+    @classmethod
+    def now(cls, tz):
+        cls._seconds += 1
+        return datetime(2026, 1, 1, 0, 0, cls._seconds % 60, tzinfo=tz)
+
+
+def test_confirm_replace_purges_backups_beyond_retention_count(app_config, conn, tmp_path, monkeypatch):
+    monkeypatch.setattr(download_watcher, "datetime", _FakeClock)
+    limited_config = dataclasses.replace(app_config, backup_retention_count=2)
+    mod_id = _install_mod(limited_config, conn, tmp_path, name="Cool Mod", filename="v1.package")
+
+    for version in ("v2", "v3", "v4"):
+        archive = tmp_path / f"{version}.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr(f"{version}.package", b"data")
+        mod_id = download_watcher.confirm_replace(archive, mod_id, config=limited_config, conn=conn)
+
+    backups = sorted((limited_config.library_dir / ".backups").iterdir())
+    assert len(backups) == 2  # 3 replaces -> 3 backups, retention=2 keeps the newest 2
+    kept_contents = {f.name for backup in backups for f in backup.iterdir()}
+    assert kept_contents == {"v2.package", "v3.package"}  # v1's backup was purged
+
+
+def test_confirm_replace_purge_is_scoped_per_mod(app_config, conn, tmp_path, monkeypatch):
+    monkeypatch.setattr(download_watcher, "datetime", _FakeClock)
+    limited_config = dataclasses.replace(app_config, backup_retention_count=1)
+    mod_a = _install_mod(limited_config, conn, tmp_path, name="Mod A", filename="a1.package")
+    mod_b = _install_mod(limited_config, conn, tmp_path, name="Mod B", filename="b1.package")
+
+    for mod_id, version in ((mod_a, "a2"), (mod_b, "b2")):
+        archive = tmp_path / f"{version}.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr(f"{version}.package", b"data")
+        download_watcher.confirm_replace(archive, mod_id, config=limited_config, conn=conn)
+
+    backups = list((limited_config.library_dir / ".backups").iterdir())
+    assert len(backups) == 2  # one kept per mod, not one total
 
 
 def test_confirm_replace_unknown_mod_raises(app_config, conn, tmp_path):

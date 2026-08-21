@@ -63,6 +63,20 @@ def _backup_library_folder(library_path: Path, config: Config) -> None:
     backups_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     shutil.copytree(library_path, backups_dir / f"{library_path.name}-{timestamp}")
+    _purge_old_backups(backups_dir, library_path.name, config.backup_retention_count)
+
+
+def _purge_old_backups(backups_dir: Path, mod_id: str, keep: int) -> None:
+    """Keeps only the `keep` most recent backups for `mod_id`; every replace
+    creates one more, and nothing was purging the rest before this — left
+    unbounded, .backups/ grows forever (CLAUDE.md's Settings §6.8 gap)."""
+    # Backup dirs are named "<mod_id>-<UTC timestamp>"; the timestamp format
+    # (%Y%m%dT%H%M%SZ) sorts lexicographically in chronological order, so a
+    # plain name sort finds the oldest ones without parsing anything.
+    existing = sorted(d for d in backups_dir.glob(f"{mod_id}-*") if d.is_dir())
+    to_delete = existing[:-keep] if keep > 0 else existing
+    for old in to_delete:
+        shutil.rmtree(old)
 
 
 def confirm_install(

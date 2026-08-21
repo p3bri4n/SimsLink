@@ -18,6 +18,7 @@ REQUIRED_VARS = (
 )
 
 DEFAULT_DOWNLOAD_WATCH_DIR = Path.home() / "Downloads"
+DEFAULT_BACKUP_RETENTION_COUNT = 5
 
 # Resolved next to the project root (one level up from this file, which
 # lives in backend/), not the process's cwd — cwd varies depending on how
@@ -43,6 +44,7 @@ class Config:
     curseforge_api_key: str | None
     download_watch_dir: Path
     game_version: str | None
+    backup_retention_count: int = DEFAULT_BACKUP_RETENTION_COUNT
 
     @property
     def has_api_key(self) -> bool:
@@ -72,6 +74,7 @@ class Config:
         download_watch_dir = values.get("DOWNLOAD_WATCH_DIR", "").strip()
         game_version = values.get("GAME_VERSION", "").strip() or None
         api_key = values.get("CURSEFORGE_API_KEY", "").strip() or None
+        backup_retention_count = _parse_backup_retention_count(values.get("BACKUP_RETENTION_COUNT", ""))
 
         return cls(
             sims4_game_dir=Path(values["SIMS4_GAME_DIR"]).expanduser(),
@@ -85,7 +88,21 @@ class Config:
                 else DEFAULT_DOWNLOAD_WATCH_DIR
             ),
             game_version=game_version,
+            backup_retention_count=backup_retention_count,
         )
+
+
+def _parse_backup_retention_count(raw: str) -> int:
+    raw = raw.strip()
+    if not raw:
+        return DEFAULT_BACKUP_RETENTION_COUNT
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConfigError(f"BACKUP_RETENTION_COUNT must be a whole number, got: {raw!r}") from None
+    if value < 1:
+        raise ConfigError("BACKUP_RETENTION_COUNT must be at least 1")
+    return value
 
 
 def detect_symlink_support(directory: Path) -> bool:

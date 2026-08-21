@@ -20,6 +20,12 @@
   "library.disabled_tag": "Disabled",
   "library.unknown": "Unknown",
 
+  "library.conflicts.toggle": "⚠ {count} potential conflict(s) detected — click to review",
+  "library.conflicts.duplicate_package": "duplicate file",
+  "library.conflicts.ts4script_name_collision": "script name collision",
+  "library.conflicts.duplicate_package_line": "{names} ship an identical .package file — likely the same mod installed twice.",
+  "library.conflicts.ts4script_name_collision_line": "{names} all ship a script file named '{filename}' — only one may actually load.",
+
   "library.compat.compatible": "Compatible",
   "library.compat.incompatible": "Incompatible",
   "library.compat.unknown": "Unknown",
@@ -98,6 +104,9 @@
 
   "settings.title": "Settings",
   "settings.folders_heading": "Folders",
+  "settings.backups_heading": "Backups",
+  "settings.backup_retention_count": "Backups kept per mod",
+  "settings.backup_retention_notice": "Set via BACKUP_RETENTION_COUNT in .env — a replaced mod's oldest backups beyond this count are purged automatically.",
   "settings.folder.game_dir": "Game directory",
   "settings.folder.mods_dir": "Mods directory",
   "settings.folder.user_dir": "Sims 4 user directory",

@@ -81,6 +81,45 @@ def test_list_mods_returns_installed_mods(app_config, conn, tmp_path, client):
     assert body[0]["active"] is True
 
 
+# --- /api/conflicts ---------------------------------------------------------------
+
+
+def test_conflicts_empty_when_no_duplicates(app_config, conn, tmp_path, client):
+    _install_mod(app_config, conn, tmp_path, "Solo Mod")
+
+    response = client.get("/api/conflicts")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_conflicts_reports_package_duplicate_with_resolved_names(app_config, conn, tmp_path, client):
+    _install_mod(app_config, conn, tmp_path, "Mod A", filename="shared.package", content=b"same-bytes")
+    _install_mod(app_config, conn, tmp_path, "Mod B", filename="shared.package", content=b"same-bytes")
+
+    response = client.get("/api/conflicts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["kind"] == "duplicate_package"
+    names = sorted(m["name"] for m in body[0]["mods"])
+    assert names == ["Mod A", "Mod B"]
+
+
+def test_conflicts_reports_ts4script_name_collision(app_config, conn, tmp_path, client):
+    _install_mod(app_config, conn, tmp_path, "Mod A", filename="core.ts4script", content=b"content-a")
+    _install_mod(app_config, conn, tmp_path, "Mod B", filename="core.ts4script", content=b"different-content-b")
+
+    response = client.get("/api/conflicts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["kind"] == "ts4script_name_collision"
+    assert body[0]["identifier"] == "core.ts4script"
+
+
 # --- /api/mods/{id} (detail) -----------------------------------------------------
 
 
@@ -573,6 +612,7 @@ def test_get_settings_returns_configured_paths(app_config, client):
     assert body["game_dir"] == str(app_config.sims4_game_dir)
     assert body["mods_dir"] == str(app_config.sims4_mods_dir)
     assert body["library_dir"] == str(app_config.library_dir)
+    assert body["backup_retention_count"] == app_config.backup_retention_count
 
 
 def test_full_scan_rehashes_and_reports_stats(app_config, conn, tmp_path, client):

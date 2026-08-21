@@ -6,6 +6,8 @@ const DOWNLOAD_POLL_INTERVAL_MS = 3000;
 
 const state = {
   mods: [],
+  conflicts: [],
+  conflictsExpanded: false,
   strings: {},
   filterQuery: "",
   currentDetailId: null,
@@ -119,7 +121,12 @@ function renderStatus() {
 // --- mod list / grid ----------------------------------------------------------
 
 async function loadMods() {
-  state.mods = await apiRequest("/api/mods");
+  const [mods, conflicts] = await Promise.all([
+    apiRequest("/api/mods"),
+    apiRequest("/api/conflicts"),
+  ]);
+  state.mods = mods;
+  state.conflicts = conflicts;
 }
 
 function visibleMods() {
@@ -130,11 +137,46 @@ function visibleMods() {
   );
 }
 
+function renderConflicts() {
+  const banner = document.getElementById("conflictsBanner");
+  const list = document.getElementById("conflictsList");
+
+  if (!state.conflicts.length) {
+    banner.hidden = true;
+    return;
+  }
+  banner.hidden = false;
+
+  document.getElementById("conflictsToggle").textContent = t("library.conflicts.toggle", {
+    count: state.conflicts.length,
+  });
+
+  list.hidden = !state.conflictsExpanded;
+  list.innerHTML = "";
+  state.conflicts.forEach((group) => {
+    const names = group.mods.map((m) => m.name).join(", ");
+    const row = document.createElement("div");
+    row.className = "conflict-row";
+    const kindLabel = document.createElement("span");
+    kindLabel.className = "kind";
+    kindLabel.textContent = t(`library.conflicts.${group.kind}`);
+    row.appendChild(kindLabel);
+    row.append(
+      group.kind === "ts4script_name_collision"
+        ? t("library.conflicts.ts4script_name_collision_line", { names, filename: group.identifier })
+        : t("library.conflicts.duplicate_package_line", { names })
+    );
+    list.appendChild(row);
+  });
+}
+
 function render() {
   document.getElementById("subtitle").textContent = t("library.subtitle", {
     installed: state.mods.length,
     active: state.mods.filter((m) => m.active).length,
   });
+
+  renderConflicts();
 
   const grid = document.getElementById("grid");
   grid.innerHTML = "";
@@ -633,6 +675,16 @@ async function loadSettings() {
     row.appendChild(elementWithText("span", "value", value));
     container.appendChild(row);
   });
+
+  const backupsContainer = document.getElementById("settingsBackups");
+  backupsContainer.innerHTML = "";
+  [["settings.backup_retention_count", String(settings.backup_retention_count)]].forEach(([labelKey, value]) => {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    row.appendChild(elementWithText("span", null, t(labelKey)));
+    row.appendChild(elementWithText("span", "value", value));
+    backupsContainer.appendChild(row);
+  });
 }
 
 async function doFullScan() {
@@ -888,6 +940,10 @@ async function init() {
   document.getElementById("confirmCancelBtn").addEventListener("click", closeConfirm);
   document.getElementById("confirmOverlay").addEventListener("click", (e) => {
     if (e.target.id === "confirmOverlay") closeConfirm();
+  });
+  document.getElementById("conflictsToggle").addEventListener("click", () => {
+    state.conflictsExpanded = !state.conflictsExpanded;
+    renderConflicts();
   });
 
   try {

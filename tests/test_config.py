@@ -13,6 +13,7 @@ ALL_ENV_VARS = (
     "CURSEFORGE_API_KEY",
     "DOWNLOAD_WATCH_DIR",
     "GAME_VERSION",
+    "BACKUP_RETENTION_COUNT",
 )
 
 
@@ -74,6 +75,36 @@ def test_from_env_download_watch_dir_uses_explicit_value(tmp_path):
     config = Config.from_env(env_path)
 
     assert config.download_watch_dir == Path("/home/user/mydownloads")
+
+
+def test_from_env_backup_retention_count_defaults_when_unset(tmp_path):
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.backup_retention_count == 5
+
+
+def test_from_env_backup_retention_count_uses_explicit_value(tmp_path):
+    env_path = write_env_file(tmp_path, BACKUP_RETENTION_COUNT="10")
+
+    config = Config.from_env(env_path)
+
+    assert config.backup_retention_count == 10
+
+
+def test_from_env_backup_retention_count_rejects_non_numeric(tmp_path):
+    env_path = write_env_file(tmp_path, BACKUP_RETENTION_COUNT="lots")
+
+    with pytest.raises(ConfigError):
+        Config.from_env(env_path)
+
+
+def test_from_env_backup_retention_count_rejects_zero(tmp_path):
+    env_path = write_env_file(tmp_path, BACKUP_RETENTION_COUNT="0")
+
+    with pytest.raises(ConfigError):
+        Config.from_env(env_path)
 
 
 def test_has_api_key_true_for_non_blank_value(tmp_path):

@@ -50,6 +50,7 @@ backend/
   scanner.py               # incremental scan (metadata) + on-demand full scan (hashing)
   crash_analyzer.py        # lastException.txt parsing + automated bisection
   cache_cleaner.py         # cache cleanup targets
+  conflict_detector.py     # duplicate/conflict detection across installed mods
 frontend/
   index.html
   style.css
@@ -78,6 +79,7 @@ LIBRARY_DIR=...           # app-managed mod library
 CURSEFORGE_API_KEY=...    # optional — see Direct Mode / Assisted Mode below
 DOWNLOAD_WATCH_DIR=...    # watched download folder for Assisted Mode, default ~/Downloads
 GAME_VERSION=...          # auto-detected if possible, otherwise manual
+BACKUP_RETENTION_COUNT=... # optional, default 5 — backups kept per mod under LIBRARY_DIR/.backups/
 ```
 
 ## Direct Mode vs Assisted Mode
@@ -192,6 +194,12 @@ No dedicated "translation" relation type exists in the CurseForge API (only `emb
 ### Dependency resolution
 Track `required` / `optional` / `translation` dependency types. Block install/enable only on unresolved `required` dependencies; warn but don't block on `optional`.
 
+### Duplicate/conflict detection
+`backend/conflict_detector.py`, surfaced via `GET /api/conflicts` and a dismissible-by-collapsing (not deletable) banner in the Library view. Purely informational — same "suspicion is not confirmation" rule as Crash Mode: never blocks install/enable, never suggests deleting anything.
+- **`.package` duplicates**: two or more mods with a byte-identical file (same `mod_files.hash`) — usually the same mod installed twice under different names. Detected via a `GROUP BY hash HAVING COUNT(DISTINCT mod_id) > 1` query — no new file parsing, `hash` is already computed at install time.
+- **`.ts4script` name collisions**: two or more mods shipping a script file with the same filename at their mod root. Since `.ts4script` archives are Python zipimport archives and the interpreter's module cache keys on module name (not path), a same-named script in two mods — often each bundling their own copy of a shared library — can silently shadow one another. Detected the same way, grouping on `relative_path` instead of `hash`.
+- Both signals come entirely from data already in `mod_files`; nothing here re-reads file contents or re-parses `.package` headers.
+
 ## Things to never do
 
 - Never install a mod directly at the `Mods/` root, and never nest a `.ts4script` more than one folder deep.
@@ -230,6 +238,9 @@ Once the above testing expectations are met, follow the collaboration pattern th
 - **Assisted Mode download detection — closed 2026-08-21.** `backend/main.py`'s `create_app()` builds a `download_watcher.DownloadWatcher` and a `PendingDownloadStore` (in-memory, lock-protected — written to by the watcher's background thread via `report_download()`, read/drained by request threads) but does not start the watcher itself, so building the app has no filesystem side effect; `desktop.py` calls `app.state.download_watcher.start()`/`.stop()` around the pywebview window's lifecycle. Routes: `GET /api/downloads/pending`, `POST /api/downloads/{token}/install`, `POST /api/downloads/{token}/replace`, `POST /api/downloads/{token}/dismiss`. The frontend polls `/api/downloads/pending` every 3s (`startDownloadPolling()` in `app.js`, no SSE/WebSocket — plain polling is fine for a single-user local app, no sub-second latency need) and shows `#downloadOverlay` when something's waiting, mirroring the old Flet dialog's Install/Replace/Dismiss choices. Tests call `app.state.report_download(path)` directly to simulate a detection with no real watcher thread involved.
 - **`Mods/` real-time watcher + manual full scan — closed 2026-08-21.** See "Startup scan" above for the full wiring (`app.state.mods_watcher`, `run_startup_scan`, `schedule_mods_rescan`, `POST /api/settings/full-scan`).
 - Reviewing/confirming suggested translation dependencies is a **separate, still-open gap**, deliberately deferred — `dependencies.py`'s detection/confirm/reject functions have no API route at all yet (see "Translation-mod detection" above).
+- **Duplicate/conflict detection — landed 2026-08-21.** See "Duplicate/conflict detection" above. Of brief §7's cross-cutting feature list, this is the only one built so far; the rest (`options.ini` "Script Mods Allowed" check, one-click mod profiles using the already-defined but unused `profiles`/`profile_mods` tables, a batch "update all" action, a local mod blacklist) remain net-new, unstarted work, not gaps in something already built.
+- **Backup retention — landed 2026-08-21.** `download_watcher._backup_library_folder()` created a timestamped backup on every replace but never purged old ones — `LIBRARY_DIR/.backups/` grew forever. Fixed: new `Config.backup_retention_count` (env var `BACKUP_RETENTION_COUNT`, default 5, validated as a positive int in `from_env()`) + `download_watcher._purge_old_backups()`, keeping only the newest N backups per mod_id (purge is scoped per mod — replacing one mod never touches another's backup history). Exposed read-only via `GET /api/settings` and the Settings view's new "Backups" section; still no in-app editing (same as the other settings), just `.env`. Of brief §6.8's settings table, this is the only entry actually backed by real logic so far — the rest (theme, tile size, log level, pattern-sensitivity, etc.) still need the underlying subsystem built before there's anything to expose.
+- The README (`README.md`) now advertises a batch "Update all" action and "automatic (confirmable) detection of translation mods" as current features — neither exists yet (translation detection has no route/UI at all; updates are per-mod only, no batch action). Left as-is deliberately (aspirational copy under an explicit "status: in development" badge) — revisit if either gets built, or if the gap needs closing sooner.
 - **Regression caught by the backend/ move, now fixed**: `config.py`'s `DEFAULT_ENV_PATH` was `Path(__file__).resolve().parent / ".env"`, which — once `config.py` lives in `backend/` instead of the project root — silently resolved to `backend/.env` instead of the real `.env`. Fixed to `.parent.parent`; see `tests/test_config.py::test_regression_default_env_path_resolves_to_project_root_not_backend_dir`. Worth remembering as a category: any other `Path(__file__)`-relative path assumption written before the move should be double-checked the same way.
 - No CurseForge API key yet — build and test everything through Assisted Mode first (now fully working end-to-end, including install). `curseforge.py` is the only module blocked on key approval.
 - `brief-sims4-mod-manager.md` (the detailed spec this file summarizes) was updated 2026-08-21 for the FastAPI/pywebview stack (architecture tree, Assisted Mode's install mechanics, i18n file paths, view/section naming). It still describes some settings/features (§6.8's full settings table, the bulk "update all" button in §4bis/6.3, several §7 cross-cutting features) as aspirational targets beyond what's actually built — that gap predates the stack switch and isn't something this pass tried to close. This file (`CLAUDE.md`) stays authoritative wherever the two disagree.
