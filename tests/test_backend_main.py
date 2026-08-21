@@ -59,6 +59,20 @@ def test_status_reports_assisted_mode_without_api_key(client):
     assert body["app_version"]
 
 
+def test_status_reports_script_mods_allowed(app_config, client):
+    (app_config.sims4_user_dir / "options.ini").write_text("scriptmodsallowed=1\n")
+
+    response = client.get("/api/status")
+
+    assert response.json()["script_mods_allowed"] is True
+
+
+def test_status_reports_script_mods_allowed_none_without_options_ini(client):
+    response = client.get("/api/status")
+
+    assert response.json()["script_mods_allowed"] is None
+
+
 # --- /api/mods (list) ------------------------------------------------------------
 
 
@@ -869,3 +883,119 @@ def test_schedule_mods_rescan_debounces_then_reruns_incremental_scan(app, app_co
         "SELECT hash FROM mod_files WHERE mod_id = ?", (mod_id,)
     ).fetchone()["hash"]
     assert new_hash != old_hash
+
+
+# --- /api/profiles --------------------------------------------------------------------
+
+
+def test_create_and_list_profile(client):
+    create_resp = client.post("/api/profiles", json={"name": "Build Only"})
+    assert create_resp.status_code == 200
+
+    list_resp = client.get("/api/profiles")
+    body = list_resp.json()
+    assert len(body) == 1
+    assert body[0]["name"] == "Build Only"
+    assert body[0]["mod_ids"] == []
+
+
+def test_create_profile_duplicate_name_returns_400(client):
+    client.post("/api/profiles", json={"name": "Build Only"})
+
+    response = client.post("/api/profiles", json={"name": "Build Only"})
+
+    assert response.status_code == 400
+
+
+def test_set_profile_mods_updates_membership(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    profile_id = client.post("/api/profiles", json={"name": "Build Only"}).json()["id"]
+
+    response = client.put(f"/api/profiles/{profile_id}/mods", json={"mod_ids": [mod_id]})
+
+    assert response.status_code == 200
+    assert response.json()["mod_ids"] == [mod_id]
+
+
+def test_set_profile_mods_unknown_profile_returns_404(client):
+    response = client.put("/api/profiles/999999/mods", json={"mod_ids": []})
+
+    assert response.status_code == 404
+
+
+def test_activate_profile_switches_active_mods(app_config, conn, tmp_path, client):
+    mod_a = _install_mod(app_config, conn, tmp_path, "Mod A", filename="a.package")
+    mod_b = _install_mod(app_config, conn, tmp_path, "Mod B", filename="b.package")
+    profile_id = client.post("/api/profiles", json={"name": "A Only"}).json()["id"]
+    client.put(f"/api/profiles/{profile_id}/mods", json={"mod_ids": [mod_a]})
+
+    response = client.post(f"/api/profiles/{profile_id}/activate")
+
+    assert response.status_code == 200
+    mods = {m["id"]: m["active"] for m in client.get("/api/mods").json()}
+    assert mods[mod_a] is True
+    assert mods[mod_b] is False
+
+
+def test_activate_profile_unknown_returns_404(client):
+    response = client.post("/api/profiles/999999/activate")
+
+    assert response.status_code == 404
+
+
+def test_delete_profile_removes_it(client):
+    profile_id = client.post("/api/profiles", json={"name": "Build Only"}).json()["id"]
+
+    response = client.delete(f"/api/profiles/{profile_id}")
+
+    assert response.status_code == 200
+    assert client.get("/api/profiles").json() == []
+
+
+# --- /api/blacklist --------------------------------------------------------------------
+
+
+def test_add_and_list_blacklist_entry(client):
+    response = client.post("/api/blacklist", json={"pattern": "badmod", "note": "corrupts saves"})
+
+    assert response.status_code == 200
+    body = client.get("/api/blacklist").json()
+    assert len(body) == 1
+    assert body[0]["pattern"] == "badmod"
+    assert body[0]["note"] == "corrupts saves"
+
+
+def test_add_blacklist_entry_rejects_empty_pattern(client):
+    response = client.post("/api/blacklist", json={"pattern": "   "})
+
+    assert response.status_code == 400
+
+
+def test_remove_blacklist_entry(client):
+    entry_id = client.post("/api/blacklist", json={"pattern": "badmod"}).json()["id"]
+
+    response = client.delete(f"/api/blacklist/{entry_id}")
+
+    assert response.status_code == 200
+    assert client.get("/api/blacklist").json() == []
+
+
+def test_blacklist_matches_flags_installed_mod(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Totally BadMod Deluxe")
+    client.post("/api/blacklist", json={"pattern": "badmod"})
+
+    response = client.get("/api/blacklist/matches")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["mod_id"] == mod_id
+    assert body[0]["patterns"] == ["badmod"]
+
+
+def test_blacklist_matches_empty_when_no_entries(app_config, conn, tmp_path, client):
+    _install_mod(app_config, conn, tmp_path, "Any Mod")
+
+    response = client.get("/api/blacklist/matches")
+
+    assert response.json() == []

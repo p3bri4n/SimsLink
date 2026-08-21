@@ -6,6 +6,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script>
+  // Applied before first paint so switching to light theme (Settings) never
+  // flashes dark on the next load — kept intentionally tiny/inline, no
+  // dependency on app.js having loaded yet.
+  (function () {
+    var theme = localStorage.getItem("simslink-theme");
+    if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+  })();
+</script>
 </head>
 <body>
 
@@ -46,8 +55,14 @@
 
       <div class="error-banner" id="errorBanner"></div>
 
-      <!-- Informational only — never blocks anything, see conflict_detector.py.
-           Hidden entirely when /api/conflicts comes back empty. -->
+      <!-- Game-wide, not mod-specific — shown whenever /api/status confirms
+           the game's options.ini has Script Mods Allowed turned off. Always
+           expanded (one line), unlike the conflicts list below. -->
+      <div class="warning-banner" id="scriptModsWarning" hidden data-i18n="library.script_mods_warning">Script Mods Allowed is off in the game's options — .ts4script mods won't load.</div>
+
+      <!-- Informational only — never blocks anything. Combines
+           conflict_detector.py's file-level conflicts and blacklist.py's
+           pattern matches; hidden entirely when both come back empty. -->
       <div class="conflicts-banner" id="conflictsBanner" hidden>
         <button class="conflicts-toggle" id="conflictsToggle" type="button"></button>
         <div class="conflicts-list" id="conflictsList" hidden></div>
@@ -148,11 +163,54 @@
       </div>
 
       <div class="detail-section">
+        <h4 data-i18n="settings.theme_heading">Theme</h4>
+        <select id="themeSelect">
+          <option value="dark" data-i18n="settings.theme.dark">Dark</option>
+          <option value="light" data-i18n="settings.theme.light">Light</option>
+        </select>
+      </div>
+
+      <div class="detail-section">
+        <h4 data-i18n="settings.tile_size_heading">Library tile size</h4>
+        <select id="tileSizeSelect">
+          <option value="large" data-i18n="settings.tile_size.large">Large</option>
+          <option value="compact" data-i18n="settings.tile_size.compact">Compact</option>
+        </select>
+      </div>
+
+      <div class="detail-section">
+        <h4 data-i18n="settings.game_heading">Game</h4>
+        <div id="settingsScriptMods" class="settings-row"></div>
+      </div>
+
+      <div class="detail-section">
         <h4 data-i18n="settings.scan_heading">Scan</h4>
         <p class="sub" data-i18n="settings.full_scan_notice">Recomputes every file hash — can take a while on large libraries.</p>
         <div class="error-banner" id="settingsErrorBanner"></div>
         <div id="settingsScanResult" class="empty-inline"></div>
         <button class="btn" id="fullScanButton" data-i18n="settings.full_scan_button">Full scan</button>
+      </div>
+
+      <div class="detail-section">
+        <h4 data-i18n="settings.profiles_heading">Profiles</h4>
+        <p class="sub" data-i18n="settings.profiles_notice">A profile saves which mods are active right now, under a name — activating it later enables exactly that set again and disables everything else.</p>
+        <div class="error-banner" id="profilesErrorBanner"></div>
+        <div id="profilesList"></div>
+        <div class="search-row">
+          <input type="text" class="text-input" id="newProfileNameInput" data-i18n-placeholder="settings.profile_name_placeholder" style="flex:1">
+          <button class="btn primary" id="createProfileButton" data-i18n="settings.create_profile_button">Save current as profile</button>
+        </div>
+      </div>
+
+      <div class="detail-section">
+        <h4 data-i18n="settings.blacklist_heading">Blacklist</h4>
+        <p class="sub" data-i18n="settings.blacklist_notice">Local and manual only — flags installed mods whose name or id matches a pattern you've entered here. Never blocks anything by itself.</p>
+        <div class="error-banner" id="blacklistErrorBanner"></div>
+        <div id="blacklistList"></div>
+        <div class="search-row">
+          <input type="text" class="text-input" id="newBlacklistPatternInput" data-i18n-placeholder="settings.blacklist_pattern_placeholder" style="flex:1">
+          <button class="btn primary" id="addBlacklistButton" data-i18n="settings.add_blacklist_button">Add</button>
+        </div>
       </div>
     </section>
   </div>

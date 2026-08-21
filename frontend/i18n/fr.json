@@ -19,12 +19,15 @@
   "library.empty": "Aucun mod installé pour l'instant.",
   "library.disabled_tag": "Désactivé",
   "library.unknown": "Inconnu",
+  "library.script_mods_warning": "⚠ « Script Mods Allowed » est désactivé dans les options du jeu — les mods .ts4script ne se chargeront pas.",
 
   "library.conflicts.toggle": "⚠ {count} conflit(s) potentiel(s) détecté(s) — cliquez pour voir le détail",
   "library.conflicts.duplicate_package": "fichier en double",
   "library.conflicts.ts4script_name_collision": "collision de nom de script",
+  "library.conflicts.blacklist_match": "correspondance liste noire",
   "library.conflicts.duplicate_package_line": "{names} contiennent un fichier .package identique — probablement le même mod installé deux fois.",
   "library.conflicts.ts4script_name_collision_line": "{names} contiennent tous un fichier script nommé '{filename}' — un seul se chargera peut-être vraiment.",
+  "library.conflicts.blacklist_match_line": "'{name}' correspond à votre/vos motif(s) de liste noire : {patterns}",
 
   "library.compat.compatible": "Compatible",
   "library.compat.incompatible": "Incompatible",
@@ -135,6 +138,37 @@
   "settings.full_scan_running": "Scan en cours…",
   "settings.full_scan_result": "{mods_scanned} mods scannés · {files_hashed} fichiers hashés · {files_removed} supprimés.",
   "settings.full_scan_error": "Échec du scan complet : {error}",
+
+  "settings.theme_heading": "Thème",
+  "settings.theme.dark": "Sombre",
+  "settings.theme.light": "Clair",
+
+  "settings.tile_size_heading": "Taille des vignettes",
+  "settings.tile_size.large": "Grande",
+  "settings.tile_size.compact": "Compacte",
+
+  "settings.game_heading": "Jeu",
+  "settings.script_mods_allowed_label": "Script Mods Allowed",
+  "settings.script_mods_enabled": "Activé",
+  "settings.script_mods_disabled": "Désactivé — les mods .ts4script ne se chargeront pas",
+
+  "settings.profiles_heading": "Profils",
+  "settings.profiles_notice": "Un profil enregistre, sous un nom, les mods actifs à l'instant présent — l'activer plus tard réactive exactement cet ensemble et désactive tout le reste.",
+  "settings.profile_name_placeholder": "Nom du profil…",
+  "settings.create_profile_button": "Enregistrer l'état actuel comme profil",
+  "settings.profiles_empty": "Aucun profil pour l'instant.",
+  "settings.profiles_error": "Échec de l'action : {error}",
+  "settings.profile_mod_count": "{count} mod(s)",
+  "settings.activate_profile_button": "Activer",
+  "settings.delete_profile_button": "Supprimer",
+
+  "settings.blacklist_heading": "Liste noire",
+  "settings.blacklist_notice": "Locale et manuelle uniquement — signale les mods installés dont le nom ou l'id correspond à un motif que vous avez saisi ici. Ne bloque jamais rien par elle-même.",
+  "settings.blacklist_pattern_placeholder": "Motif à rechercher…",
+  "settings.add_blacklist_button": "Ajouter",
+  "settings.blacklist_empty": "Aucun motif de liste noire pour l'instant.",
+  "settings.blacklist_error": "Échec de l'action : {error}",
+  "settings.remove_blacklist_button": "Retirer",
 
   "downloads.detected_title": "Nouveau téléchargement détecté",
   "downloads.detected_message": "Fichier détecté : {filename}. Installer ce mod ?",

@@ -19,12 +19,15 @@
   "library.empty": "No mods installed yet.",
   "library.disabled_tag": "Disabled",
   "library.unknown": "Unknown",
+  "library.script_mods_warning": "⚠ Script Mods Allowed is off in the game's options — .ts4script mods won't load.",
 
   "library.conflicts.toggle": "⚠ {count} potential conflict(s) detected — click to review",
   "library.conflicts.duplicate_package": "duplicate file",
   "library.conflicts.ts4script_name_collision": "script name collision",
+  "library.conflicts.blacklist_match": "blacklist match",
   "library.conflicts.duplicate_package_line": "{names} ship an identical .package file — likely the same mod installed twice.",
   "library.conflicts.ts4script_name_collision_line": "{names} all ship a script file named '{filename}' — only one may actually load.",
+  "library.conflicts.blacklist_match_line": "'{name}' matches your blacklist pattern(s): {patterns}",
 
   "library.compat.compatible": "Compatible",
   "library.compat.incompatible": "Incompatible",
@@ -135,6 +138,37 @@
   "settings.full_scan_running": "Scanning…",
   "settings.full_scan_result": "Scanned {mods_scanned} mods · {files_hashed} files hashed · {files_removed} removed.",
   "settings.full_scan_error": "Full scan failed: {error}",
+
+  "settings.theme_heading": "Theme",
+  "settings.theme.dark": "Dark",
+  "settings.theme.light": "Light",
+
+  "settings.tile_size_heading": "Library tile size",
+  "settings.tile_size.large": "Large",
+  "settings.tile_size.compact": "Compact",
+
+  "settings.game_heading": "Game",
+  "settings.script_mods_allowed_label": "Script Mods Allowed",
+  "settings.script_mods_enabled": "Enabled",
+  "settings.script_mods_disabled": "Disabled — .ts4script mods won't load",
+
+  "settings.profiles_heading": "Profiles",
+  "settings.profiles_notice": "A profile saves which mods are active right now, under a name — activating it later enables exactly that set again and disables everything else.",
+  "settings.profile_name_placeholder": "Profile name…",
+  "settings.create_profile_button": "Save current as profile",
+  "settings.profiles_empty": "No profiles yet.",
+  "settings.profiles_error": "Action failed: {error}",
+  "settings.profile_mod_count": "{count} mod(s)",
+  "settings.activate_profile_button": "Activate",
+  "settings.delete_profile_button": "Delete",
+
+  "settings.blacklist_heading": "Blacklist",
+  "settings.blacklist_notice": "Local and manual only — flags installed mods whose name or id matches a pattern you've entered here. Never blocks anything by itself.",
+  "settings.blacklist_pattern_placeholder": "Pattern to match…",
+  "settings.add_blacklist_button": "Add",
+  "settings.blacklist_empty": "No blacklist patterns yet.",
+  "settings.blacklist_error": "Action failed: {error}",
+  "settings.remove_blacklist_button": "Remove",
 
   "downloads.detected_title": "New download detected",
   "downloads.detected_message": "New file detected: {filename}. Install this mod?",

@@ -7,12 +7,15 @@ const DOWNLOAD_POLL_INTERVAL_MS = 3000;
 const state = {
   mods: [],
   conflicts: [],
+  blacklistMatches: [],
   conflictsExpanded: false,
   strings: {},
   filterQuery: "",
   currentDetailId: null,
   status: null,
   lang: "en",
+  theme: "dark",
+  tileSize: "large",
   catalogWired: false,
   updatesWired: false,
   crashWired: false,
@@ -122,12 +125,14 @@ function renderStatus() {
 // --- mod list / grid ----------------------------------------------------------
 
 async function loadMods() {
-  const [mods, conflicts] = await Promise.all([
+  const [mods, conflicts, blacklistMatches] = await Promise.all([
     apiRequest("/api/mods"),
     apiRequest("/api/conflicts"),
+    apiRequest("/api/blacklist/matches"),
   ]);
   state.mods = mods;
   state.conflicts = conflicts;
+  state.blacklistMatches = blacklistMatches;
 }
 
 function visibleMods() {
@@ -138,18 +143,25 @@ function visibleMods() {
   );
 }
 
-function renderConflicts() {
+function renderWarnings() {
+  // Game-wide, not mod-specific — always a single line, not part of the
+  // collapsible list below.
+  document.getElementById("scriptModsWarning").hidden = !(
+    state.status && state.status.script_mods_allowed === false
+  );
+
   const banner = document.getElementById("conflictsBanner");
   const list = document.getElementById("conflictsList");
+  const totalCount = state.conflicts.length + state.blacklistMatches.length;
 
-  if (!state.conflicts.length) {
+  if (!totalCount) {
     banner.hidden = true;
     return;
   }
   banner.hidden = false;
 
   document.getElementById("conflictsToggle").textContent = t("library.conflicts.toggle", {
-    count: state.conflicts.length,
+    count: totalCount,
   });
 
   list.hidden = !state.conflictsExpanded;
@@ -169,6 +181,18 @@ function renderConflicts() {
     );
     list.appendChild(row);
   });
+  state.blacklistMatches.forEach((match) => {
+    const row = document.createElement("div");
+    row.className = "conflict-row";
+    const kindLabel = document.createElement("span");
+    kindLabel.className = "kind";
+    kindLabel.textContent = t("library.conflicts.blacklist_match");
+    row.appendChild(kindLabel);
+    row.append(
+      t("library.conflicts.blacklist_match_line", { name: match.mod_name, patterns: match.patterns.join(", ") })
+    );
+    list.appendChild(row);
+  });
 }
 
 function render() {
@@ -177,7 +201,7 @@ function render() {
     active: state.mods.filter((m) => m.active).length,
   });
 
-  renderConflicts();
+  renderWarnings();
 
   const grid = document.getElementById("grid");
   grid.innerHTML = "";
@@ -693,9 +717,25 @@ function initSettingsView() {
     const select = document.getElementById("languageSelect");
     select.value = state.lang;
     select.addEventListener("change", (e) => switchLanguage(e.target.value));
+
+    const themeSelect = document.getElementById("themeSelect");
+    themeSelect.value = state.theme;
+    themeSelect.addEventListener("change", (e) => applyTheme(e.target.value));
+
+    const tileSizeSelect = document.getElementById("tileSizeSelect");
+    tileSizeSelect.value = state.tileSize;
+    tileSizeSelect.addEventListener("change", (e) => {
+      applyTileSize(e.target.value);
+      render();
+    });
+
     document.getElementById("fullScanButton").addEventListener("click", doFullScan);
+    document.getElementById("createProfileButton").addEventListener("click", doCreateProfile);
+    document.getElementById("addBlacklistButton").addEventListener("click", doAddBlacklistEntry);
   }
   loadSettings();
+  loadProfiles();
+  loadBlacklist();
 }
 
 async function loadSettings() {
@@ -731,6 +771,201 @@ async function loadSettings() {
     row.appendChild(elementWithText("span", "value", value));
     backupsContainer.appendChild(row);
   });
+
+  renderScriptModsSetting();
+}
+
+function renderScriptModsSetting() {
+  const el = document.getElementById("settingsScriptMods");
+  el.innerHTML = "";
+  const allowed = state.status ? state.status.script_mods_allowed : null;
+  const label =
+    allowed === true
+      ? t("settings.script_mods_enabled")
+      : allowed === false
+        ? t("settings.script_mods_disabled")
+        : t("library.unknown");
+  el.appendChild(elementWithText("span", null, t("settings.script_mods_allowed_label")));
+  el.appendChild(elementWithText("span", "value", label));
+}
+
+// --- theme / tile size (client-side preferences, no backend involved) --------------
+
+function applyTheme(theme) {
+  state.theme = theme;
+  if (theme === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  localStorage.setItem("simslink-theme", theme);
+}
+
+function applyTileSize(size) {
+  state.tileSize = size;
+  document.getElementById("grid").classList.toggle("tile-compact", size === "compact");
+  localStorage.setItem("simslink-tile-size", size);
+}
+
+// --- profiles ----------------------------------------------------------------------
+
+async function loadProfiles() {
+  const container = document.getElementById("profilesList");
+  container.innerHTML = "";
+  let items;
+  try {
+    items = await apiRequest("/api/profiles");
+  } catch (err) {
+    showError("profilesErrorBanner", t("settings.profiles_error", { error: err.message }));
+    return;
+  }
+  if (!items.length) {
+    container.appendChild(elementWithText("div", "empty-inline", t("settings.profiles_empty")));
+    return;
+  }
+  items.forEach((profile) => container.appendChild(buildProfileRow(profile)));
+}
+
+function buildProfileRow(profile) {
+  const row = document.createElement("div");
+  row.className = "list-row";
+
+  const info = document.createElement("div");
+  info.className = "info";
+  info.appendChild(elementWithText("span", null, profile.name));
+  info.appendChild(
+    elementWithText("span", "note", t("settings.profile_mod_count", { count: profile.mod_ids.length }))
+  );
+  row.appendChild(info);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const activateBtn = document.createElement("button");
+  activateBtn.className = "btn btn-sm primary";
+  activateBtn.textContent = t("settings.activate_profile_button");
+  activateBtn.addEventListener("click", () => doActivateProfile(profile.id, activateBtn));
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn btn-sm";
+  deleteBtn.textContent = t("settings.delete_profile_button");
+  deleteBtn.addEventListener("click", () => doDeleteProfile(profile.id));
+  actions.appendChild(activateBtn);
+  actions.appendChild(deleteBtn);
+  row.appendChild(actions);
+
+  return row;
+}
+
+async function doCreateProfile() {
+  const input = document.getElementById("newProfileNameInput");
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    const profile = await apiRequest("/api/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const modIds = state.mods.filter((m) => m.active).map((m) => m.id);
+    await apiRequest(`/api/profiles/${profile.id}/mods`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mod_ids: modIds }),
+    });
+    input.value = "";
+    await loadProfiles();
+  } catch (err) {
+    showError("profilesErrorBanner", t("settings.profiles_error", { error: err.message }));
+  }
+}
+
+async function doActivateProfile(profileId, button) {
+  button.disabled = true;
+  try {
+    await apiRequest(`/api/profiles/${profileId}/activate`, { method: "POST" });
+    await loadMods();
+    render();
+  } catch (err) {
+    showError("profilesErrorBanner", t("settings.profiles_error", { error: err.message }));
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function doDeleteProfile(profileId) {
+  try {
+    await apiRequest(`/api/profiles/${profileId}`, { method: "DELETE" });
+    await loadProfiles();
+  } catch (err) {
+    showError("profilesErrorBanner", t("settings.profiles_error", { error: err.message }));
+  }
+}
+
+// --- blacklist -----------------------------------------------------------------------
+
+async function loadBlacklist() {
+  const container = document.getElementById("blacklistList");
+  container.innerHTML = "";
+  let items;
+  try {
+    items = await apiRequest("/api/blacklist");
+  } catch (err) {
+    showError("blacklistErrorBanner", t("settings.blacklist_error", { error: err.message }));
+    return;
+  }
+  if (!items.length) {
+    container.appendChild(elementWithText("div", "empty-inline", t("settings.blacklist_empty")));
+    return;
+  }
+  items.forEach((entry) => container.appendChild(buildBlacklistRow(entry)));
+}
+
+function buildBlacklistRow(entry) {
+  const row = document.createElement("div");
+  row.className = "list-row";
+
+  const info = document.createElement("div");
+  info.className = "info";
+  info.appendChild(elementWithText("span", null, entry.pattern));
+  if (entry.note) info.appendChild(elementWithText("span", "note", entry.note));
+  row.appendChild(info);
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn btn-sm";
+  deleteBtn.textContent = t("settings.remove_blacklist_button");
+  deleteBtn.addEventListener("click", () => doRemoveBlacklistEntry(entry.id));
+  row.appendChild(deleteBtn);
+
+  return row;
+}
+
+async function doAddBlacklistEntry() {
+  const input = document.getElementById("newBlacklistPatternInput");
+  const pattern = input.value.trim();
+  if (!pattern) return;
+  try {
+    await apiRequest("/api/blacklist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pattern }),
+    });
+    input.value = "";
+    await loadBlacklist();
+    await loadMods(); // blacklist matches feed into the Library warnings banner
+    render();
+  } catch (err) {
+    showError("blacklistErrorBanner", t("settings.blacklist_error", { error: err.message }));
+  }
+}
+
+async function doRemoveBlacklistEntry(entryId) {
+  try {
+    await apiRequest(`/api/blacklist/${entryId}`, { method: "DELETE" });
+    await loadBlacklist();
+    await loadMods();
+    render();
+  } catch (err) {
+    showError("blacklistErrorBanner", t("settings.blacklist_error", { error: err.message }));
+  }
 }
 
 async function doFullScan() {
@@ -1087,6 +1322,11 @@ async function init() {
   state.lang = detectLang();
   await loadI18n(state.lang);
   applyStaticI18n();
+  // Theme was already applied pre-paint by the inline <script> in
+  // index.html's <head> — this just syncs `state`/the Settings dropdown to
+  // match, not re-applies it (avoids a redundant DOM write, not a flash risk).
+  applyTheme(localStorage.getItem("simslink-theme") || "dark");
+  applyTileSize(localStorage.getItem("simslink-tile-size") || "large");
   wireSearch();
   wireNav();
   document.getElementById("confirmCancelBtn").addEventListener("click", closeConfirm);
@@ -1095,7 +1335,7 @@ async function init() {
   });
   document.getElementById("conflictsToggle").addEventListener("click", () => {
     state.conflictsExpanded = !state.conflictsExpanded;
-    renderConflicts();
+    renderWarnings();
   });
 
   try {

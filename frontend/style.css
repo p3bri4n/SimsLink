@@ -24,6 +24,28 @@
   --font-body: 'Inter', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
 }
+
+/* Light theme — opt-in via <html data-theme="light">, set by app.js from a
+   Settings toggle (persisted in localStorage; see the inline <head> script
+   in index.html that applies it before first paint to avoid a flash). Dark
+   stays the bare :root default above, matching the original design. */
+:root[data-theme="light"] {
+  --bg: #F2F6F5;
+  --panel: #FFFFFF;
+  --panel-raised: #F6FAF9;
+  --border: #DCE6E3;
+  --text: #16211F;
+  --text-dim: #4E6D67;
+  --text-faint: #7C948F;
+  --accent: #1D8F68;
+  --accent-dim: #33E6A6;
+  --accent-glow: rgba(29,143,104,0.14);
+  --warn: #C94A2E;
+  --warn-glow: rgba(201,74,46,0.12);
+  --unknown: #93A9A4;
+}
+:root[data-theme="light"] body { background-image: none; }
+
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -209,6 +231,13 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 16px;
 }
+.grid.tile-compact {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.grid.tile-compact .thumb { height: 80px; }
+.grid.tile-compact .card-body { padding: 8px 10px 10px; }
+.grid.tile-compact .card-body p { display: none; } /* no room for the description at this size */
 
 .card {
   background: var(--panel);
@@ -349,3 +378,30 @@ select {
   padding: 9px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px;
 }
 .settings-row .value { font-family: var(--font-mono); color: var(--text-dim); text-align: right; word-break: break-all; }
+
+.text-input {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; color: var(--text); font-family: var(--font-body); font-size: 13px;
+  outline: none;
+}
+.text-input:focus { border-color: var(--accent-dim); }
+
+.list-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 12px; background: var(--panel-raised); border-radius: 8px; margin-bottom: 6px;
+  font-size: 12.5px;
+}
+.list-row .info { flex: 1; min-width: 0; }
+.list-row .info .note { color: var(--text-faint); font-size: 11px; margin-left: 6px; }
+.list-row .actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.warning-banner {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--warn-glow);
+  border: 1px solid rgba(255,106,71,0.35);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  color: var(--warn);
+  font-size: 13px; font-weight: 600;
+}

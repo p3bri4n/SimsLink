@@ -51,6 +51,9 @@ backend/
   crash_analyzer.py        # lastException.txt parsing + automated bisection
   cache_cleaner.py         # cache cleanup targets
   conflict_detector.py     # duplicate/conflict detection across installed mods
+  game_options.py          # reads options.ini for settings SimsLink checks (Script Mods Allowed)
+  profiles.py              # named, switchable sets of "which mods should be active"
+  blacklist.py             # local, user-editable list of known-bad mod name/id patterns
 frontend/
   index.html
   style.css
@@ -160,6 +163,12 @@ crash_log (
   confirmed_faulty_mod_id,
   user_note
 )
+
+blacklist (
+  id, pattern,          -- matched case-insensitively as a substring of a mod's name or id
+  note,
+  created_date
+)
 ```
 
 ## Key features and how they should behave
@@ -200,6 +209,16 @@ Track `required` / `optional` / `translation` dependency types. Block install/en
 - **`.package` duplicates**: two or more mods with a byte-identical file (same `mod_files.hash`) — usually the same mod installed twice under different names. Detected via a `GROUP BY hash HAVING COUNT(DISTINCT mod_id) > 1` query — no new file parsing, `hash` is already computed at install time.
 - **`.ts4script` name collisions**: two or more mods shipping a script file with the same filename at their mod root. Since `.ts4script` archives are Python zipimport archives and the interpreter's module cache keys on module name (not path), a same-named script in two mods — often each bundling their own copy of a shared library — can silently shadow one another. Detected the same way, grouping on `relative_path` instead of `hash`.
 - Both signals come entirely from data already in `mod_files`; nothing here re-reads file contents or re-parses `.package` headers.
+- Also surfaced in the Library warnings banner (same collapsible list, not a separate one): `blacklist.py` matches (below) — the banner's toggle count and list combine both.
+
+### "Script Mods Allowed" check
+`backend/game_options.py` reads the game's `options.ini` (location: `SIMS4_USER_DIR/options.ini`) looking for a `scriptmodsallowed` key — **not** tied to a specific `[Section]`, since the game's ini format/section naming isn't officially documented and a wrong guess there would make the check silently never find anything; it scans every `key=value` line regardless of section. Returns `True`/`False` only for an unambiguous value, `None` (never treated as "disabled") when the file or key is missing. Exposed via `GET /api/status`'s `script_mods_allowed` field, re-read on every call (cheap file read) rather than cached like `direct_mode`, since the game can rewrite this file while SimsLink is running. Shown as an always-expanded warning banner in the Library view when `false`, plus a read-only line in Settings.
+
+### Mod profiles
+`backend/profiles.py`, using the `profiles`/`profile_mods` tables (previously defined in the schema but never used by any code until now). A profile is a named snapshot of "which mods should be active"; `set_profile_mods()` replaces membership wholesale (simpler for a UI that captures "the mods active right now" than one managing per-mod add/remove), and `activate_profile()` makes exactly that set active — enabling every member and disabling every non-member via the existing `mod_manager.enable()`/`disable()` symlink toggling, nothing new invented for activation itself. Fails fast (propagates `UnresolvedRequiredDependencyError`/`ModManagerError`) on the first mod that can't be enabled, rather than silently partially applying a profile. Settings UI creation flow is deliberately minimal: "save the mods active right now as a new profile" (name + current active set) rather than a full mod-picker/editor — editing membership later means deleting and recreating.
+
+### Local mod blacklist
+`backend/blacklist.py` — a simplified version of SimsForge's malicious-mod flagging (see this file's "Project" section). Purely local and manual: entries are typed in by the user via Settings, nothing fetches a shared/remote list, and a match only ever informs (surfaced in the Library warnings banner alongside conflict-detector's findings) — it never blocks install/enable, same "suspicion is not confirmation" rule as everywhere else. Matching is a case-insensitive substring check against both a mod's display name and its id/slug.
 
 ## Things to never do
 
@@ -243,6 +262,8 @@ Once the above testing expectations are met, follow the collaboration pattern th
 - **Backup retention — landed 2026-08-21.** `download_watcher._backup_library_folder()` created a timestamped backup on every replace but never purged old ones — `LIBRARY_DIR/.backups/` grew forever. Fixed: new `Config.backup_retention_count` (env var `BACKUP_RETENTION_COUNT`, default 5, validated as a positive int in `from_env()`) + `download_watcher._purge_old_backups()`, keeping only the newest N backups per mod_id (purge is scoped per mod — replacing one mod never touches another's backup history). Exposed read-only via `GET /api/settings` and the Settings view's new "Backups" section; still no in-app editing (same as the other settings), just `.env`. Of brief §6.8's settings table, this is the only entry actually backed by real logic so far — the rest (theme, tile size, log level, pattern-sensitivity, etc.) still need the underlying subsystem built before there's anything to expose.
 - The README's "automatic (confirmable) detection of translation mods" claim is now accurate (see above). Its batch "Update all" claim is now accurate too — see below.
 - **Batch "Update all" — landed 2026-08-21.** Frontend-only; no new backend route needed, since `doUpdateAll()` in `app.js` just loops `POST /api/updates/{mod_id}/apply` over whatever `POST /api/updates/check` most recently flagged as `update_available` (tracked in `state.updatableMods`). One mod's failure doesn't abort the batch — failures are collected and reported together (`updates.update_all_partial_error`), then the check re-runs so applied mods drop off the list and failures are re-offered. The "Update all" button only appears once there are ≥2 updatable mods (with exactly one, the per-row "Update" button is already a single click). Confirmation goes through the shared `openConfirmModal()`, listing every mod about to be updated before it starts — each individual `apply` still backs up via `download_watcher.confirm_replace()` same as before, nothing new there.
+- **Brief §7 "Script Mods Allowed"/profiles/blacklist, and brief §6.8 theme/tile size — landed 2026-08-21.** See "Script Mods Allowed" check / "Mod profiles" / "Local mod blacklist" above for the backend side. Frontend: Settings gets Theme (dark/light) and Library tile size (large/compact) dropdowns — both pure client-side preferences (`localStorage`, no backend route), applied via a `data-theme` attribute and a `.tile-compact` class respectively; the theme is applied pre-paint by a tiny inline `<script>` in `index.html`'s `<head>` (reads `localStorage` before the stylesheet/DOM even render) specifically to avoid a dark→light flash on load. Settings also gets Profiles and Blacklist management sections (list/create/activate/delete, list/add/remove).
+- **Explicitly not attempted**: log level and Crash Mode "pattern-sensitivity" settings (brief §6.8). Neither maps onto anything that exists — there's no logging infrastructure in the codebase to configure a level for, and `crash_analyzer.py`'s known-pattern matching is a binary regex check with no notion of a tunable score/threshold. Building either needs a real design pass first (what would the level actually gate? what would "sensitivity" actually change about detection?), not just a Settings field that changes nothing. Skipped by explicit choice, not an oversight.
 - **Regression caught by the backend/ move, now fixed**: `config.py`'s `DEFAULT_ENV_PATH` was `Path(__file__).resolve().parent / ".env"`, which — once `config.py` lives in `backend/` instead of the project root — silently resolved to `backend/.env` instead of the real `.env`. Fixed to `.parent.parent`; see `tests/test_config.py::test_regression_default_env_path_resolves_to_project_root_not_backend_dir`. Worth remembering as a category: any other `Path(__file__)`-relative path assumption written before the move should be double-checked the same way.
 - No CurseForge API key yet — build and test everything through Assisted Mode first (now fully working end-to-end, including install). `curseforge.py` is the only module blocked on key approval.
 - `brief-sims4-mod-manager.md` (the detailed spec this file summarizes) was updated 2026-08-21 for the FastAPI/pywebview stack (architecture tree, Assisted Mode's install mechanics, i18n file paths, view/section naming). It still describes some settings/features (§6.8's full settings table, the bulk "update all" button in §4bis/6.3, several §7 cross-cutting features) as aspirational targets beyond what's actually built — that gap predates the stack switch and isn't something this pass tried to close. This file (`CLAUDE.md`) stays authoritative wherever the two disagree.

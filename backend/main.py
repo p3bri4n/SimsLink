@@ -31,6 +31,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import blacklist as blacklist_module
 from . import cache_cleaner
 from . import conflict_detector
 from . import crash_analyzer
@@ -38,7 +39,9 @@ from . import curseforge
 from . import db
 from . import dependencies
 from . import download_watcher
+from . import game_options
 from . import mod_manager
+from . import profiles as profiles_module
 from . import scanner
 from .config import Config
 
@@ -64,6 +67,19 @@ class ReplaceDownloadRequest(BaseModel):
 
 class SuggestTranslationRequest(BaseModel):
     source_mod_id: str
+
+
+class CreateProfileRequest(BaseModel):
+    name: str
+
+
+class SetProfileModsRequest(BaseModel):
+    mod_ids: list[str]
+
+
+class AddBlacklistEntryRequest(BaseModel):
+    pattern: str
+    note: str | None = None
 
 
 class PendingDownloadStore:
@@ -249,10 +265,14 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
 
     @app.get("/api/status")
     def get_status() -> dict:
+        # Re-read every call (cheap file read) rather than cached at app
+        # creation like direct_mode — the game can rewrite options.ini while
+        # SimsLink is running (e.g. the user changes it in-game).
         return {
             "app_version": APP_VERSION,
             "game_version": config.game_version,
             "direct_mode": direct_mode,
+            "script_mods_allowed": game_options.script_mods_allowed(config),
         }
 
     @app.get("/api/mods")
@@ -673,6 +693,89 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             "files_unchanged": stats.files_unchanged,
             "files_removed": stats.files_removed,
         }
+
+    # --- Profiles --------------------------------------------------------------------
+
+    def profile_dict(profile: profiles_module.Profile) -> dict:
+        return {"id": profile.id, "name": profile.name, "mod_ids": profile.mod_ids}
+
+    @app.get("/api/profiles")
+    def list_profiles_route(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        return [profile_dict(p) for p in profiles_module.list_profiles(conn)]
+
+    @app.post("/api/profiles")
+    def create_profile_route(payload: CreateProfileRequest, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        try:
+            profile_id = profiles_module.create_profile(payload.name, conn)
+        except profiles_module.ProfileError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return profile_dict(profiles_module.get_profile(profile_id, conn))
+
+    @app.delete("/api/profiles/{profile_id}")
+    def delete_profile_route(profile_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        profiles_module.delete_profile(profile_id, conn)
+        return {"deleted": profile_id}
+
+    @app.put("/api/profiles/{profile_id}/mods")
+    def set_profile_mods_route(
+        profile_id: int, payload: SetProfileModsRequest, conn: sqlite3.Connection = Depends(get_conn)
+    ) -> dict:
+        try:
+            profiles_module.set_profile_mods(profile_id, payload.mod_ids, conn)
+        except profiles_module.ProfileError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return profile_dict(profiles_module.get_profile(profile_id, conn))
+
+    @app.post("/api/profiles/{profile_id}/activate")
+    def activate_profile_route(profile_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        try:
+            profiles_module.activate_profile(profile_id, config=config, conn=conn)
+        except profiles_module.ProfileError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except dependencies.UnresolvedRequiredDependencyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except mod_manager.ModManagerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return profile_dict(profiles_module.get_profile(profile_id, conn))
+
+    # --- Blacklist -------------------------------------------------------------------
+
+    def blacklist_entry_dict(entry: blacklist_module.BlacklistEntry) -> dict:
+        return {"id": entry.id, "pattern": entry.pattern, "note": entry.note}
+
+    @app.get("/api/blacklist")
+    def list_blacklist_route(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        return [blacklist_entry_dict(e) for e in blacklist_module.list_entries(conn)]
+
+    @app.post("/api/blacklist")
+    def add_blacklist_entry_route(
+        payload: AddBlacklistEntryRequest, conn: sqlite3.Connection = Depends(get_conn)
+    ) -> dict:
+        try:
+            entry_id = blacklist_module.add_entry(payload.pattern, conn, note=payload.note)
+        except blacklist_module.BlacklistError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        entry = next(e for e in blacklist_module.list_entries(conn) if e.id == entry_id)
+        return blacklist_entry_dict(entry)
+
+    @app.delete("/api/blacklist/{entry_id}")
+    def remove_blacklist_entry_route(entry_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        blacklist_module.remove_entry(entry_id, conn)
+        return {"deleted": entry_id}
+
+    @app.get("/api/blacklist/matches")
+    def blacklist_matches_route(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        entries = blacklist_module.list_entries(conn)
+        if not entries:
+            return []
+        results = []
+        for row in conn.execute("SELECT id, name FROM mods ORDER BY name COLLATE NOCASE"):
+            hits = blacklist_module.find_matches(row["name"], row["id"], entries)
+            if hits:
+                results.append(
+                    {"mod_id": row["id"], "mod_name": row["name"], "patterns": [h.pattern for h in hits]}
+                )
+        return results
 
     # Registered last so it never shadows the /api/ routes above.
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

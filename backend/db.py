@@ -103,6 +103,21 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE dependencies ADD COLUMN depends_on_mod_id TEXT REFERENCES mods(id) ON DELETE SET NULL;
         """,
     ),
+    (
+        4,
+        """
+        -- Local, user-editable blacklist of known-bad mod name/id patterns
+        -- (blacklist.py) — a simplified version of SimsForge's malicious-mod
+        -- flagging (see CLAUDE.md). Purely local: nothing fetches a shared
+        -- list, matching only ever informs, never blocks install.
+        CREATE TABLE blacklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pattern TEXT NOT NULL,
+            note TEXT,
+            created_date TEXT NOT NULL
+        );
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
