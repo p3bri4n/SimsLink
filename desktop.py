@@ -41,14 +41,20 @@ def main() -> None:
 
     app = create_app(config)
     server = _start_server(app)
-    # Real-time detection of new downloads (Assisted Mode) — see
-    # backend/main.py's create_app() for why this isn't started there.
+    # Real-time detection of new downloads (Assisted Mode) and of external
+    # changes under Mods/ — see backend/main.py's create_app() for why
+    # neither is started there. The startup catch-up scan runs in its own
+    # thread so it never delays opening the window (CLAUDE.md: "must never
+    # block the UI").
     app.state.download_watcher.start()
+    app.state.mods_watcher.start()
+    threading.Thread(target=app.state.run_startup_scan, daemon=True).start()
     try:
         webview.create_window("SimsLink", f"http://{HOST}:{PORT}/", width=1280, height=800, min_size=(960, 600))
         webview.start()
     finally:
         app.state.download_watcher.stop()
+        app.state.mods_watcher.stop()
         server.should_exit = True
 
 

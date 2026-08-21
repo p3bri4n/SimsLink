@@ -38,6 +38,7 @@ from . import db
 from . import dependencies
 from . import download_watcher
 from . import mod_manager
+from . import scanner
 from .config import Config
 
 APP_VERSION = "0.1.0"  # keep in sync with pyproject.toml's [project].version
@@ -152,6 +153,50 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
 
     app.state.download_watcher = download_watcher.DownloadWatcher(config, report_download)
     app.state.report_download = report_download
+
+    # Mods/ real-time watcher + startup catch-up scan (CLAUDE.md's "Startup
+    # scan"). Same not-started-here rule as the download watcher above, for
+    # the same reason: building the app must stay side-effect-free.
+    #
+    # ModsFolderWatcher's on_change fires on every single filesystem event
+    # under Mods/ with no debounce of its own (see scanner.py) — a symlink
+    # toggle alone touches several paths — so this debounces before paying
+    # for a rescan, and (like report_download) opens its own connection
+    # since it runs off the request-scoped `conn` dependency's thread.
+    _scan_debounce_lock = threading.Lock()
+    _scan_timer: threading.Timer | None = None
+    _SCAN_DEBOUNCE_SECONDS = 2.0
+
+    def run_incremental_scan() -> None:
+        conn = db.connect(db_path)
+        try:
+            scanner.incremental_scan(config, conn)
+        finally:
+            conn.close()
+
+    def schedule_mods_rescan() -> None:
+        nonlocal _scan_timer
+        with _scan_debounce_lock:
+            if _scan_timer is not None:
+                _scan_timer.cancel()
+            _scan_timer = threading.Timer(_SCAN_DEBOUNCE_SECONDS, run_incremental_scan)
+            _scan_timer.daemon = True
+            _scan_timer.start()
+
+    def run_startup_scan() -> None:
+        # Adopts anything dropped directly under Mods/ before the app
+        # managed it, then catches up on size/mtime changes made while the
+        # app was closed — the real-time watcher only covers "while running".
+        conn = db.connect(db_path)
+        try:
+            scanner.import_untracked_mods(config, conn)
+            scanner.incremental_scan(config, conn)
+        finally:
+            conn.close()
+
+    app.state.mods_watcher = scanner.ModsFolderWatcher(config, schedule_mods_rescan)
+    app.state.run_startup_scan = run_startup_scan
+    app.state.schedule_mods_rescan = schedule_mods_rescan  # exposed for tests, same idea as report_download
 
     def mod_summary(row: sqlite3.Row) -> dict:
         return {
@@ -540,6 +585,21 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             "user_dir": str(config.sims4_user_dir),
             "library_dir": str(config.library_dir),
             "download_watch_dir": str(config.download_watch_dir),
+        }
+
+    @app.post("/api/settings/full-scan")
+    def run_full_scan(conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        # Manual-only, synchronous — the caller (Settings button) is
+        # expected to wait and show its own "scanning..." state; this isn't
+        # the startup path CLAUDE.md's "must never block the UI" targets,
+        # it's a deliberate, user-initiated, already-slow action (rehashes
+        # every tracked file, parallelized across cores in scanner.py).
+        stats = scanner.full_scan(config, conn)
+        return {
+            "mods_scanned": stats.mods_scanned,
+            "files_hashed": stats.files_hashed,
+            "files_unchanged": stats.files_unchanged,
+            "files_removed": stats.files_removed,
         }
 
     # Registered last so it never shadows the /api/ routes above.

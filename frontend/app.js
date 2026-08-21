@@ -605,6 +605,7 @@ function initSettingsView() {
     const select = document.getElementById("languageSelect");
     select.value = state.lang;
     select.addEventListener("change", (e) => switchLanguage(e.target.value));
+    document.getElementById("fullScanButton").addEventListener("click", doFullScan);
   }
   loadSettings();
 }
@@ -616,7 +617,7 @@ async function loadSettings() {
   try {
     settings = await apiRequest("/api/settings");
   } catch (err) {
-    showError("errorBanner", t("library.action_error", { error: err.message }));
+    showError("settingsErrorBanner", t("library.action_error", { error: err.message }));
     return;
   }
   [
@@ -632,6 +633,26 @@ async function loadSettings() {
     row.appendChild(elementWithText("span", "value", value));
     container.appendChild(row);
   });
+}
+
+async function doFullScan() {
+  const button = document.getElementById("fullScanButton");
+  const resultEl = document.getElementById("settingsScanResult");
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = t("settings.full_scan_running");
+  resultEl.textContent = "";
+  try {
+    const stats = await apiRequest("/api/settings/full-scan", { method: "POST" });
+    resultEl.textContent = t("settings.full_scan_result", stats);
+    await loadMods(); // hashes/removed files may have changed what Library shows
+    render();
+  } catch (err) {
+    showError("settingsErrorBanner", t("settings.full_scan_error", { error: err.message }));
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
 }
 
 async function switchLanguage(lang) {

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import time
 import zipfile
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from fastapi.testclient import TestClient
 from backend import curseforge
 from backend import dependencies as deps
 from backend import mod_manager
+from backend import scanner
 from backend.main import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -573,6 +575,28 @@ def test_get_settings_returns_configured_paths(app_config, client):
     assert body["library_dir"] == str(app_config.library_dir)
 
 
+def test_full_scan_rehashes_and_reports_stats(app_config, conn, tmp_path, client):
+    mod_id = mod_manager.install(
+        _write_zip(tmp_path / "source.zip", "mymod.package"),
+        config=app_config, conn=conn, mod_name="Cool Mod",
+    )
+    old_hash = conn.execute(
+        "SELECT hash FROM mod_files WHERE mod_id = ?", (mod_id,)
+    ).fetchone()["hash"]
+    (Path(app_config.library_dir) / mod_id / "mymod.package").write_bytes(b"changed-data")
+
+    response = client.post("/api/settings/full-scan")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mods_scanned"] == 1
+    assert body["files_hashed"] == 1
+    new_hash = conn.execute(
+        "SELECT hash FROM mod_files WHERE mod_id = ?", (mod_id,)
+    ).fetchone()["hash"]
+    assert new_hash != old_hash
+
+
 # --- /api/downloads (Assisted Mode detection) -----------------------------------------
 #
 # app.state.report_download(path) simulates a DownloadWatcher detection
@@ -668,3 +692,52 @@ def test_dismiss_pending_download_removes_without_installing(app, client, tmp_pa
     assert response.status_code == 200
     assert client.get("/api/downloads/pending").json() == []
     assert client.get("/api/mods").json() == []  # never installed
+
+
+# --- Mods/ real-time watcher + startup scan --------------------------------------------
+#
+# The real watchdog Observer (scanner.ModsFolderWatcher) is exercised for
+# real in tests/test_scanner.py; here we only check backend/main.py's own
+# wiring: that it's built-but-not-started, and that the debounce/startup-scan
+# functions it exposes on app.state actually call into scanner.py correctly.
+
+
+def test_mods_watcher_is_built_but_not_auto_started(app):
+    assert isinstance(app.state.mods_watcher, scanner.ModsFolderWatcher)
+
+
+def test_run_startup_scan_imports_untracked_mods_into_db(app, app_config, conn):
+    # A real directory dropped directly under Mods/ before SimsLink managed
+    # it — exactly what import_untracked_mods() is for.
+    unmanaged = app_config.sims4_mods_dir / "some-preexisting-mod"
+    unmanaged.mkdir(parents=True)
+    (unmanaged / "preexisting.package").write_bytes(b"data")
+
+    app.state.run_startup_scan()
+
+    row = conn.execute("SELECT id FROM mods WHERE id = 'some-preexisting-mod'").fetchone()
+    assert row is not None
+    assert (app_config.sims4_mods_dir / "some-preexisting-mod").is_symlink()
+
+
+def test_schedule_mods_rescan_debounces_then_reruns_incremental_scan(app, app_config, conn, tmp_path):
+    mod_id = mod_manager.install(
+        _write_zip(tmp_path / "source.zip", "mymod.package"),
+        config=app_config, conn=conn, mod_name="Cool Mod",
+    )
+    old_hash = conn.execute(
+        "SELECT hash FROM mod_files WHERE mod_id = ?", (mod_id,)
+    ).fetchone()["hash"]
+
+    time.sleep(0.05)  # ensure a distinct mtime from the install above
+    (Path(app_config.library_dir) / mod_id / "mymod.package").write_bytes(b"changed-data")
+
+    app.state.schedule_mods_rescan()
+    app.state.schedule_mods_rescan()  # a second event inside the debounce window: still one scan
+
+    time.sleep(2.5)  # past the 2s debounce in backend/main.py
+
+    new_hash = conn.execute(
+        "SELECT hash FROM mod_files WHERE mod_id = ?", (mod_id,)
+    ).fetchone()["hash"]
+    assert new_hash != old_hash

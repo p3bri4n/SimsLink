@@ -132,6 +132,14 @@
           <option value="fr">Français</option>
         </select>
       </div>
+
+      <div class="detail-section">
+        <h4 data-i18n="settings.scan_heading">Scan</h4>
+        <p class="sub" data-i18n="settings.full_scan_notice">Recomputes every file hash — can take a while on large libraries.</p>
+        <div class="error-banner" id="settingsErrorBanner"></div>
+        <div id="settingsScanResult" class="empty-inline"></div>
+        <button class="btn" id="fullScanButton" data-i18n="settings.full_scan_button">Full scan</button>
+      </div>
     </section>
   </div>
 </div>

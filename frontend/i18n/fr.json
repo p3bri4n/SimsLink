@@ -104,6 +104,12 @@
   "settings.folder.library_dir": "Dossier bibliothèque",
   "settings.folder.download_watch_dir": "Dossier de téléchargement surveillé",
   "settings.language_heading": "Langue",
+  "settings.scan_heading": "Scan",
+  "settings.full_scan_notice": "Recalcule le hash de chaque fichier — peut prendre du temps sur une grosse bibliothèque.",
+  "settings.full_scan_button": "Scan complet",
+  "settings.full_scan_running": "Scan en cours…",
+  "settings.full_scan_result": "{mods_scanned} mods scannés · {files_hashed} fichiers hashés · {files_removed} supprimés.",
+  "settings.full_scan_error": "Échec du scan complet : {error}",
 
   "downloads.detected_title": "Nouveau téléchargement détecté",
   "downloads.detected_message": "Fichier détecté : {filename}. Installer ce mod ?",

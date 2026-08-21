@@ -104,6 +104,12 @@
   "settings.folder.library_dir": "Library directory",
   "settings.folder.download_watch_dir": "Download watch directory",
   "settings.language_heading": "Language",
+  "settings.scan_heading": "Scan",
+  "settings.full_scan_notice": "Recomputes every file hash — can take a while on large libraries.",
+  "settings.full_scan_button": "Full scan",
+  "settings.full_scan_running": "Scanning…",
+  "settings.full_scan_result": "Scanned {mods_scanned} mods · {files_hashed} files hashed · {files_removed} removed.",
+  "settings.full_scan_error": "Full scan failed: {error}",
 
   "downloads.detected_title": "New download detected",
   "downloads.detected_message": "New file detected: {filename}. Install this mod?",

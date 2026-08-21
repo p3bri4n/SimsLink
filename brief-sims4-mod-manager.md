@@ -2,7 +2,9 @@
 
 ## 1. Contexte et objectif
 
-**Nom du projet : SimsLink.** Application desktop Python (interface Flet, base SQLite) pour gérer les mods The Sims 4 sur Linux. Le manager officiel CurseForge n'existe pas sur Linux — ce projet comble ce vide, avec un différenciateur clé : diagnostic automatisé des crashs pour identifier le(s) mod(s) fautif(s).
+**Nom du projet : SimsLink.** Application desktop Python (backend FastAPI exposant une API REST locale, frontend HTML/CSS/JS, le tout encapsulé dans une fenêtre native via pywebview ; base SQLite) pour gérer les mods The Sims 4 sur Linux. Le manager officiel CurseForge n'existe pas sur Linux — ce projet comble ce vide, avec un différenciateur clé : diagnostic automatisé des crashs pour identifier le(s) mod(s) fautif(s).
+
+*Note de révision (2026-08-21) : ce brief décrivait initialement une interface Flet. Le projet est passé à la stack FastAPI + pywebview décrite ci-dessus ; les sections suivantes ont été mises à jour en conséquence. En cas de divergence avec `CLAUDE.md`, ce dernier fait foi — c'est le document que Claude Code consulte en premier.*
 
 Projet comparable identifié : [SimsForge](https://github.com/Teyk0o/simsforge) (stack TS/Express/Prisma, pas concurrent direct mais bonnes idées : import filesystem, détection de mods malveillants).
 
@@ -22,25 +24,29 @@ Projet comparable identifié : [SimsForge](https://github.com/Teyk0o/simsforge) 
 ## 3. Architecture
 
 ```
-config.py       # chargement .env
-db.py           # sqlite : schéma + migrations
-curseforge.py   # client API : search, get_files, download (mode Direct uniquement)
-download_watcher.py  # surveillance du dossier de téléchargement (mode Assisté)
-mod_manager.py  # install / enable / disable / delete / update
-dependencies.py # résolution graphe de dépendances (incl. détection de traductions)
-package_parser.py  # lecture d'en-tête DBPF (.package) — ressources STBL, détection traduction
-scanner.py      # scan incrémental (métadonnées) + scan complet (hash) à la demande
-crash_analyzer.py  # parsing lastException.txt, bisection automatisée
-i18n/           # fichiers de traduction UI (fr.json, en.json)
-ui/
-  - bibliotheque.py
-  - catalogue.py
-  - maj.py
-  - mode_crash.py
-  - parametres.py
+backend/
+  main.py         # app FastAPI + routes — couche HTTP fine au-dessus des modules ci-dessous
+  config.py       # chargement .env
+  db.py           # sqlite : schéma + migrations
+  curseforge.py   # client API : search, get_files, download (mode Direct uniquement)
+  download_watcher.py  # surveillance du dossier de téléchargement (mode Assisté)
+  mod_manager.py  # install / enable / disable / delete / update
+  dependencies.py # résolution graphe de dépendances (incl. détection de traductions)
+  package_parser.py  # lecture d'en-tête DBPF (.package) — ressources STBL, détection traduction
+  scanner.py      # scan incrémental (métadonnées) + scan complet (hash) à la demande
+  crash_analyzer.py  # parsing lastException.txt, bisection automatisée
+  cache_cleaner.py   # nettoyage du cache
+frontend/
+  index.html
+  style.css
+  app.js          # SPA : bascule de vue côté client (pas de fichier par vue)
+  i18n/           # fr.json, en.json — chaînes UI uniquement, chargées et injectées côté client
+desktop.py        # lance FastAPI (thread) + ouvre la fenêtre pywebview
 ```
 
 Tous les fichiers ci-dessus (noms, code, commentaires) sont écrits en anglais dans l'implémentation réelle — les noms français utilisés dans ce brief ne servent qu'à la lisibilité du document de spec.
+
+Chaque module de `backend/` (hors `main.py`) est de la logique métier pure, testable indépendamment ; `main.py` ne fait que la traduire en HTTP. Contrairement à l'ancienne architecture Flet (un fichier Python par vue sous `ui/`), le frontend est une unique page (`index.html`) avec plusieurs sections basculées en JavaScript (`switchView()`), chacune consommant les routes `/api/...` via `fetch`.
 
 ### Modèle : bibliothèque + symlinks
 - **Bibliothèque** : dossier de stockage réel des mods installés (organisation simple, à plat — inutile de classer en multi-niveaux).
@@ -78,8 +84,8 @@ Comportement déjà décrit en section 6.2/6.3 : catalogue interrogeable, badges
 ### Mode Assisté (fonctionnement en l'absence de clé)
 
 **Installation :**
-1. L'utilisateur clique sur un mod (lien externe stocké, ou recherche manuelle) → `webbrowser.open(url_curseforge)`. Navigation humaine normale dans le navigateur — aucune requête automatisée vers CurseForge, donc aucun souci de CGU.
-2. L'app surveille `DOWNLOAD_WATCH_DIR` (`download_watcher.py`, lib `watchdog`) et détecte l'apparition d'un nouveau fichier `.zip`/`.package`/`.ts4script`.
+1. L'utilisateur clique sur un mod (lien externe stocké, ou recherche manuelle) → le frontend appelle `POST /api/open-external`, qui ouvre l'URL dans le **navigateur système par défaut** via `webbrowser.open()` côté backend (jamais dans la fenêtre pywebview elle-même). Navigation humaine normale — aucune requête automatisée vers CurseForge, donc aucun souci de CGU.
+2. L'app surveille `DOWNLOAD_WATCH_DIR` (`download_watcher.py`, lib `watchdog`) et détecte l'apparition d'un nouveau fichier `.zip`/`.package`/`.ts4script`. Le backend expose cette détection au frontend via une file d'attente en mémoire (`GET /api/downloads/pending`), interrogée par polling toutes les 3 secondes côté client — pas de latence perceptible pour ce cas d'usage, et ça évite d'introduire un canal SSE/WebSocket pour un besoin aussi simple.
 3. Confirmation utilisateur : *"Fichier détecté : `xxx.zip` — installer ce mod ?"*
 4. Le fichier repasse dans le pipeline d'installation standard (extraction, détection profondeur `.ts4script`, placement `Mods/<mod_id>/`, ajout DB) — identique au mode Direct à partir de cette étape.
 5. Le lien CurseForge d'origine est conservé en DB (`liens.curseforge_url`) même sans API, pour permettre la vérification manuelle ultérieure.
@@ -146,7 +152,7 @@ crash_log (
 
 ---
 
-## 6. Vues Flet
+## 6. Vues (frontend)
 
 ### 6.1 Bibliothèque
 Grille de vignettes des mods installés (actifs + inactifs grisés). Chaque vignette affiche au minimum `description_courte`. Clic sur une vignette → **modal de détail** :
@@ -248,10 +254,12 @@ Bouton **"Vider le cache"**, accessible depuis Paramètres et depuis le Mode Cra
 
 - Langues supportées au lancement : **français** et **anglais**.
 - Détection automatique de la langue système au premier démarrage, avec sélecteur manuel de override dans Paramètres (Français / Anglais / Système).
-- Fichiers de traduction dans `i18n/fr.json` et `i18n/en.json` — clés en anglais, aucune chaîne UI codée en dur dans le code applicatif.
+- Fichiers de traduction dans `frontend/i18n/fr.json` et `frontend/i18n/en.json`, chargés et injectés côté client — clés en anglais, aucune chaîne UI codée en dur dans le code applicatif (backend ou frontend).
 - Rappel : cette localisation ne concerne que l'interface utilisateur. Code source, commentaires et README restent intégralement en anglais (voir section 1).
 
-### 6.8 Paramètres (vue `parametres.py`)
+### 6.8 Paramètres
+
+*Table ci-dessous = cible visée par le brief ; l'implémentation actuelle (`GET /api/settings` + section Paramètres du frontend) n'en couvre pour l'instant qu'un sous-ensemble minimal (dossiers en lecture seule, choix de langue sans persistance) — voir `CLAUDE.md` pour l'état réel.*
 
 | Catégorie | Paramètres |
 |---|---|
