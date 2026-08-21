@@ -1,0 +1,48 @@
+{
+  "app.title": "SimsLink",
+
+  "mode.direct_banner": "Mode Direct — connecté à CurseForge",
+  "mode.assisted_banner": "Mode Assisté — installation via navigateur",
+  "mode.direct_label": "Mode Direct",
+  "mode.assisted_label": "Mode Assisté",
+
+  "nav.library": "Bibliothèque",
+  "nav.catalog": "Catalogue",
+  "nav.updates": "Mises à jour",
+  "nav.crash_mode": "Mode Crash",
+  "nav.settings": "Paramètres",
+
+  "library.title": "Bibliothèque",
+  "library.subtitle": "{installed} mods installés · {active} actifs",
+  "library.search_placeholder": "Rechercher un mod, un auteur…",
+  "library.empty": "Aucun mod installé pour l'instant.",
+  "library.disabled_tag": "Désactivé",
+  "library.unknown": "Inconnu",
+
+  "library.compat.compatible": "Compatible",
+  "library.compat.incompatible": "Incompatible",
+  "library.compat.unknown": "Inconnue",
+
+  "library.detail.author": "par {value}",
+  "library.detail.no_description": "Aucune description.",
+  "library.detail.dependencies_heading": "Dépendances",
+  "library.detail.no_dependencies": "Aucune dépendance connue.",
+  "library.detail.dependency_type.required": "requise",
+  "library.detail.dependency_type.optional": "optionnelle",
+  "library.detail.dependency_type.translation": "traduction",
+  "library.detail.dependency_confidence.confirmed": "confirmée",
+  "library.detail.dependency_confidence.suggested": "suggérée",
+  "library.detail.dependency_unknown_target": "CurseForge n°{id}",
+  "library.detail.dependency_unknown_mod": "Mod inconnu",
+  "library.detail.files_heading": "Fichiers installés",
+  "library.detail.no_files": "Aucun fichier suivi.",
+  "library.detail.open_folder_button": "Ouvrir le dossier",
+  "library.detail.delete_button": "Supprimer",
+
+  "library.delete_confirm.title": "Supprimer ce mod ?",
+  "library.delete_confirm.message": "Ceci retire '{name}' de la bibliothèque définitivement.",
+  "library.delete_confirm.cancel": "Annuler",
+  "library.delete_confirm.confirm": "Supprimer",
+
+  "library.action_error": "Échec de l'action : {error}"
+}

@@ -1,0 +1,48 @@
+{
+  "app.title": "SimsLink",
+
+  "mode.direct_banner": "Direct Mode — connected to CurseForge",
+  "mode.assisted_banner": "Assisted Mode — browser-based install",
+  "mode.direct_label": "Direct Mode",
+  "mode.assisted_label": "Assisted Mode",
+
+  "nav.library": "Library",
+  "nav.catalog": "Catalog",
+  "nav.updates": "Updates",
+  "nav.crash_mode": "Crash Mode",
+  "nav.settings": "Settings",
+
+  "library.title": "Library",
+  "library.subtitle": "{installed} mods installed · {active} active",
+  "library.search_placeholder": "Search a mod, an author…",
+  "library.empty": "No mods installed yet.",
+  "library.disabled_tag": "Disabled",
+  "library.unknown": "Unknown",
+
+  "library.compat.compatible": "Compatible",
+  "library.compat.incompatible": "Incompatible",
+  "library.compat.unknown": "Unknown",
+
+  "library.detail.author": "by {value}",
+  "library.detail.no_description": "No description.",
+  "library.detail.dependencies_heading": "Dependencies",
+  "library.detail.no_dependencies": "No known dependencies.",
+  "library.detail.dependency_type.required": "required",
+  "library.detail.dependency_type.optional": "optional",
+  "library.detail.dependency_type.translation": "translation",
+  "library.detail.dependency_confidence.confirmed": "confirmed",
+  "library.detail.dependency_confidence.suggested": "suggested",
+  "library.detail.dependency_unknown_target": "CurseForge #{id}",
+  "library.detail.dependency_unknown_mod": "Unknown mod",
+  "library.detail.files_heading": "Installed files",
+  "library.detail.no_files": "No tracked files.",
+  "library.detail.open_folder_button": "Open folder",
+  "library.detail.delete_button": "Delete",
+
+  "library.delete_confirm.title": "Delete mod?",
+  "library.delete_confirm.message": "This removes '{name}' from the library permanently.",
+  "library.delete_confirm.cancel": "Cancel",
+  "library.delete_confirm.confirm": "Delete",
+
+  "library.action_error": "Action failed: {error}"
+}

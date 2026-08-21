@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>SimsLink — Maquette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #111A1B;
+    --panel: #182324;
+    --panel-raised: #1F2C2D;
+    --border: #263636;
+    --text: #EAF1EF;
+    --text-dim: #8AA19D;
+    --text-faint: #547170;
+    --accent: #33E6A6;
+    --accent-dim: #1D8F68;
+    --accent-glow: rgba(51,230,166,0.18);
+    --warn: #FF6A47;
+    --warn-glow: rgba(255,106,71,0.18);
+    --unknown: #5C7674;
+    --radius: 10px;
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    height: 100vh;
+    overflow: hidden;
+    background-image:
+      radial-gradient(circle at 15% 0%, rgba(51,230,166,0.05), transparent 40%),
+      radial-gradient(circle at 85% 100%, rgba(255,106,71,0.04), transparent 40%);
+  }
+
+  /* ---------- Diamond signature element ---------- */
+  .gem {
+    width: 10px; height: 10px;
+    background: var(--accent);
+    transform: rotate(45deg);
+    border-radius: 2px;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .gem.pulse { animation: pulse 2.2s ease-in-out infinite; }
+  .gem.warn { background: var(--warn); }
+  .gem.unknown { background: var(--unknown); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+    50% { box-shadow: 0 0 0 6px var(--accent-glow); }
+  }
+
+  /* ---------- Layout shell ---------- */
+  .app { display: grid; grid-template-columns: 240px 1fr; grid-template-rows: 64px 1fr; height: 100vh; }
+
+  .topbar {
+    grid-column: 1 / 3;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(17,26,27,0.7);
+    backdrop-filter: blur(8px);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+  .brand .gem { width: 14px; height: 14px; }
+
+  .search-wrap { position: relative; width: 360px; }
+  .search-wrap input {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 14px 9px 34px;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 13.5px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .search-wrap input:focus { border-color: var(--accent-dim); }
+  .search-wrap svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); opacity: .5; }
+
+  .mode-pill {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 6px 12px 6px 10px;
+    border-radius: 100px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+  }
+  .mode-pill:hover { border-color: var(--accent-dim); }
+  .mode-pill span.label { color: var(--text); }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 20px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .nav-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  .nav-item:hover { background: var(--panel); color: var(--text); }
+  .nav-item.active { background: var(--panel-raised); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+  .nav-item .count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--warn-glow);
+    color: var(--warn);
+    padding: 1px 7px;
+    border-radius: 100px;
+  }
+  .sidebar-divider { height: 1px; background: var(--border); margin: 14px 4px; }
+  .sidebar-foot { margin-top: auto; padding: 12px; font-size: 11.5px; color: var(--text-faint); font-family: var(--font-mono); }
+
+  /* ---------- Main content ---------- */
+  .main { padding: 24px 28px; overflow-y: auto; position: relative; }
+  .main-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
+  .main-head h1 { font-family: var(--font-display); font-size: 22px; margin: 0; }
+  .main-head .sub { color: var(--text-dim); font-size: 13px; margin-top: 4px; }
+  .actions { display: flex; gap: 10px; }
+  .btn {
+    font-family: var(--font-body);
+    font-size: 13px; font-weight: 600;
+    padding: 9px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+    display: flex; align-items: center; gap: 7px;
+    transition: all .12s;
+  }
+  .btn:hover { border-color: var(--accent-dim); }
+  .btn.primary { background: var(--accent); color: #08211A; border: none; }
+  .btn.primary:hover { background: #4CF2B7; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform .14s ease, border-color .14s ease;
+  }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent-dim); }
+  .thumb {
+    height: 118px;
+    background: linear-gradient(135deg, #22403A, #16302B);
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .thumb .initial { font-family: var(--font-display); font-size: 28px; font-weight: 700; color: rgba(255,255,255,0.15); }
+  .compat-badge {
+    position: absolute; top: 9px; right: 9px;
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(17,26,27,0.75);
+    backdrop-filter: blur(4px);
+    padding: 4px 8px 4px 6px;
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-dim);
+  }
+  .disabled-tag {
+    position: absolute; top: 9px; left: 9px;
+    background: rgba(17,26,27,0.75);
+    font-size: 10px; font-family: var(--font-mono);
+    padding: 3px 7px; border-radius: 5px; color: var(--text-faint);
+  }
+  .card.is-inactive .thumb { filter: grayscale(0.6) brightness(0.7); }
+  .card.is-inactive .card-body { opacity: 0.55; }
+
+  .card-body { padding: 12px 14px 14px; }
+  .card-body h3 { font-family: var(--font-display); font-size: 14.5px; margin: 0 0 4px; font-weight: 600; }
+  .card-body p { font-size: 12px; color: var(--text-dim); margin: 0 0 10px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-meta { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+  .toggle {
+    width: 30px; height: 17px; background: var(--border); border-radius: 100px; position: relative; cursor: pointer; flex-shrink: 0;
+  }
+  .toggle::after { content: ''; position: absolute; width: 13px; height: 13px; background: var(--text-dim); border-radius: 50%; top: 2px; left: 2px; transition: all .15s; }
+  .toggle.on { background: var(--accent-dim); }
+  .toggle.on::after { left: 15px; background: var(--accent); }
+
+  /* ---------- Detail panel ---------- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(8,13,13,0.55);
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+    z-index: 40;
+  }
+  .overlay.show { opacity: 1; pointer-events: all; }
+
+  .detail {
+    position: fixed; top: 0; right: 0; height: 100vh; width: 420px;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    transform: translateX(100%);
+    transition: transform .25s cubic-bezier(.16,1,.3,1);
+    z-index: 41;
+    overflow-y: auto;
+  }
+  .detail.show { transform: translateX(0); }
+  .detail-hero { height: 150px; background: linear-gradient(135deg, #22403A, #16302B); position: relative; }
+  .detail-close {
+    position: absolute; top: 14px; right: 14px;
+    width: 30px; height: 30px; border-radius: 8px;
+    background: rgba(17,26,27,0.6); border: 1px solid var(--border);
+    color: var(--text); display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 16px;
+  }
+  .detail-body { padding: 20px 22px 40px; }
+  .detail-body h2 { font-family: var(--font-display); font-size: 20px; margin: 0 0 4px; }
+  .detail-author { font-size: 12.5px; color: var(--text-dim); margin-bottom: 16px; }
+  .detail-badges { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+  .pill {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-family: var(--font-mono);
+    padding: 5px 10px; border-radius: 100px;
+    background: var(--panel-raised); border: 1px solid var(--border); color: var(--text-dim);
+  }
+  .detail-desc { font-size: 13.5px; line-height: 1.65; color: var(--text); margin-bottom: 22px; }
+  .detail-section { margin-bottom: 20px; }
+  .detail-section h4 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-faint); margin: 0 0 10px; font-weight: 600;
+  }
+  .dep-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 12px; background: var(--panel-raised); border-radius: 8px; margin-bottom: 6px;
+    font-size: 12.5px;
+  }
+  .dep-row .type { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+  .file-row { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); padding: 5px 0; border-bottom: 1px dashed var(--border); }
+  .detail-actions { display: flex; gap: 8px; margin-top: 6px; }
+  .detail-actions .btn { flex: 1; justify-content: center; }
+  .btn.danger { color: var(--warn); border-color: rgba(255,106,71,0.3); }
+  .btn.danger:hover { background: var(--warn-glow); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="topbar">
+    <div class="brand"><span class="gem"></span> SimsLink</div>
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="text" placeholder="Rechercher un mod, un auteur…">
+    </div>
+    <div class="mode-pill" onclick="toggleMode()">
+      <span class="gem pulse" id="modeGem"></span>
+      <span class="label" id="modeLabel">Mode Direct</span>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="nav-item active">📚 Bibliothèque</div>
+    <div class="nav-item">🗂 Catalogue</div>
+    <div class="nav-item">⬆ Mises à jour <span class="count">3</span></div>
+    <div class="nav-item">⚠ Mode Crash</div>
+    <div class="sidebar-divider"></div>
+    <div class="nav-item">⚙ Paramètres</div>
+    <div class="sidebar-foot">v0.1.0 · GAME 1.111.223</div>
+  </div>
+
+  <div class="main">
+    <div class="main-head">
+      <div>
+        <h1>Bibliothèque</h1>
+        <div class="sub">27 mods installés · 24 actifs</div>
+      </div>
+      <div class="actions">
+        <button class="btn">🧹 Nettoyer le cache</button>
+        <button class="btn">↻ Scan complet</button>
+        <button class="btn primary">＋ Installer un mod</button>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <div class="card" onclick="openDetail(this)"
+        data-name="MC Command Center" data-author="Deaderpool"
+        data-desc="Suite d'outils de gestion avancée : contrôle des PNJ, des relations, des carrières et de nombreux réglages fins du comportement des Sims. Référence quasi incontournable de la communauté."
+        data-version="v27.4.1" data-status="compatible" data-type="Script"
+      >
+        <div class="thumb">
+          <span class="initial">MC</span>
+          <span class="compat-badge"><span class="gem" style="width:8px;height:8px"></span> Compatible</span>
+        </div>
+        <div class="card-body">
+          <h3>MC Command Center</h3>
+          <p>Suite d'outils de gestion avancée des PNJ, carrières et relations.</p>
+          <div class="card-meta">
+            <span>v27.4.1</span>
+            <span class="toggle on"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" onclick="openDetail(this)"
+        data-name="UI Cheats Extension" data-author="Weerbesu"
+        data-desc="Étend l'interface du jeu pour accéder à des raccourcis de triche directement via les panneaux existants (besoins, argent, compétences) sans passer par la console de commandes."
+        data-version="v1.31" data-status="compatible" data-type="Script"
+      >
+        <div class="thumb">
+          <span class="initial">UI</span>
+          <span class="compat-badge"><span class="gem" style="width:8px;height:8px"></span> Compatible</span>
+        </div>
+        <div class="card-body">
+          <h3>UI Cheats Extension</h3>
+          <p>Raccourcis de triche accessibles directement depuis l'interface.</p>
+          <div class="card-meta">
+            <span>v1.31</span>
+            <span class="toggle on"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" onclick="openDetail(this)"
+        data-name="Better Build/Buy" data-author="TwistedMexi"
+        data-desc="Débloque les restrictions de placement en mode Construction/Achat et ajoute des filtres de catalogue supplémentaires."
+        data-version="v3.2" data-status="unknown" data-type="Package"
+      >
+        <div class="thumb">
+          <span class="initial">BB</span>
+          <span class="compat-badge"><span class="gem unknown" style="width:8px;height:8px"></span> Inconnue</span>
+        </div>
+        <div class="card-body">
+          <h3>Better Build/Buy</h3>
+          <p>Débloque les restrictions de placement en mode Construction.</p>
+          <div class="card-meta">
+            <span>v3.2</span>
+            <span class="toggle on"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card is-inactive" onclick="openDetail(this)"
+        data-name="Explore Mode Overhaul" data-author="LittleMsSam"
+        data-desc="Remplace le système d'exploration par défaut par une version enrichie avec plus d'interactions et d'événements aléatoires."
+        data-version="v2.0" data-status="incompatible" data-type="Script"
+      >
+        <div class="thumb">
+          <span class="initial">EM</span>
+          <span class="disabled-tag">Désactivé</span>
+          <span class="compat-badge"><span class="gem warn" style="width:8px;height:8px"></span> Incompatible</span>
+        </div>
+        <div class="card-body">
+          <h3>Explore Mode Overhaul</h3>
+          <p>Système d'exploration enrichi avec événements aléatoires.</p>
+          <div class="card-meta">
+            <span>v2.0</span>
+            <span class="toggle"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" onclick="openDetail(this)"
+        data-name="Slice of Life" data-author="Kawaiistacie"
+        data-desc="Ajoute des mécaniques de vie quotidienne plus fines : acné, cycles émotionnels, réputation sociale."
+        data-version="v9.1" data-status="compatible" data-type="Mixte"
+      >
+        <div class="thumb">
+          <span class="initial">SoL</span>
+          <span class="compat-badge"><span class="gem" style="width:8px;height:8px"></span> Compatible</span>
+        </div>
+        <div class="card-body">
+          <h3>Slice of Life</h3>
+          <p>Mécaniques de vie quotidienne enrichies et cycles émotionnels.</p>
+          <div class="card-meta">
+            <span>v9.1</span>
+            <span class="toggle on"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" onclick="openDetail(this)"
+        data-name="Basemental Overhaul" data-author="community"
+        data-desc="Ensemble de retouches diverses de gameplay, sans dépendance connue à d'autres mods installés."
+        data-version="v1.4" data-status="unknown" data-type="Package"
+      >
+        <div class="thumb">
+          <span class="initial">BO</span>
+          <span class="compat-badge"><span class="gem unknown" style="width:8px;height:8px"></span> Inconnue</span>
+        </div>
+        <div class="card-body">
+          <h3>Basemental Overhaul</h3>
+          <p>Retouches diverses de gameplay sans dépendance connue.</p>
+          <div class="card-meta">
+            <span>v1.4</span>
+            <span class="toggle on"></span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" onclick="closeDetail()"></div>
+<div class="detail" id="detail">
+  <div class="detail-hero">
+    <div class="detail-close" onclick="closeDetail()">✕</div>
+  </div>
+  <div class="detail-body">
+    <h2 id="dName">—</h2>
+    <div class="detail-author" id="dAuthor">—</div>
+    <div class="detail-badges">
+      <span class="pill" id="dStatus"><span class="gem" style="width:7px;height:7px"></span> —</span>
+      <span class="pill" id="dVersion">—</span>
+      <span class="pill" id="dType">—</span>
+    </div>
+    <div class="detail-desc" id="dDesc">—</div>
+
+    <div class="detail-section">
+      <h4>Dépendances</h4>
+      <div class="dep-row"><span>Traduction française</span><span class="type">traduction · confirmée</span></div>
+      <div class="dep-row"><span>XML Injector</span><span class="type">requise · confirmée</span></div>
+    </div>
+
+    <div class="detail-section">
+      <h4>Fichiers installés</h4>
+      <div class="file-row">Mods/mod_id/main.package</div>
+      <div class="file-row">Mods/mod_id/scripts.ts4script</div>
+      <div class="file-row">Mods/mod_id/strings_fr.package</div>
+    </div>
+
+    <div class="detail-actions">
+      <button class="btn">Ouvrir le dossier</button>
+      <button class="btn danger">Supprimer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openDetail(card) {
+    document.getElementById('dName').textContent = card.dataset.name;
+    document.getElementById('dAuthor').textContent = 'par ' + card.dataset.author;
+    document.getElementById('dDesc').textContent = card.dataset.desc;
+    document.getElementById('dVersion').textContent = card.dataset.version;
+    document.getElementById('dType').textContent = card.dataset.type;
+
+    const statusEl = document.getElementById('dStatus');
+    const gem = statusEl.querySelector('.gem');
+    gem.classList.remove('warn', 'unknown');
+    let label = 'Compatible';
+    if (card.dataset.status === 'incompatible') { gem.classList.add('warn'); label = 'Incompatible'; }
+    if (card.dataset.status === 'unknown') { gem.classList.add('unknown'); label = 'Inconnue'; }
+    statusEl.lastChild ? statusEl.childNodes[1].textContent = ' ' + label : null;
+    statusEl.innerHTML = `<span class="gem ${card.dataset.status === 'incompatible' ? 'warn' : card.dataset.status === 'unknown' ? 'unknown' : ''}" style="width:7px;height:7px"></span> ${label}`;
+
+    document.getElementById('detail').classList.add('show');
+    document.getElementById('overlay').classList.add('show');
+  }
+  function closeDetail() {
+    document.getElementById('detail').classList.remove('show');
+    document.getElementById('overlay').classList.remove('show');
+  }
+  function toggleMode() {
+    const gem = document.getElementById('modeGem');
+    const label = document.getElementById('modeLabel');
+    if (label.textContent === 'Mode Direct') {
+      gem.classList.remove('pulse'); gem.classList.add('warn');
+      label.textContent = 'Mode Assisté';
+    } else {
+      gem.classList.add('pulse'); gem.classList.remove('warn');
+      label.textContent = 'Mode Direct';
+    }
+  }
+  document.querySelectorAll('.toggle').forEach(t => {
+    t.addEventListener('click', (e) => { e.stopPropagation(); t.classList.toggle('on'); });
+  });
+</script>
+
+</body>
+</html>

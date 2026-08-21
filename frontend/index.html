@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SimsLink</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="topbar">
+    <div class="brand"><span class="gem"></span> SimsLink</div>
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="text" id="searchInput" data-i18n-placeholder="library.search_placeholder">
+    </div>
+    <!-- Reflects the real Direct/Assisted state from /api/status — not
+         clickable, unlike the mockup's demo toggle (see CLAUDE.md's mode
+         table: you can't switch into Direct Mode without a valid key). -->
+    <div class="mode-pill" id="modePill">
+      <span class="gem pulse" id="modeGem"></span>
+      <span class="label" id="modeLabel">—</span>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="nav-item active"><span data-i18n="nav.library">Library</span></div>
+    <!-- Catalog/Updates/Crash Mode/Settings aren't wired to this frontend
+         yet (still only in the Flet app's ui/*.py) — shown for the shell's
+         visual layout, not yet clickable. -->
+    <div class="nav-item disabled"><span data-i18n="nav.catalog">Catalog</span></div>
+    <div class="nav-item disabled"><span data-i18n="nav.updates">Updates</span></div>
+    <div class="nav-item disabled"><span data-i18n="nav.crash_mode">Crash Mode</span></div>
+    <div class="sidebar-divider"></div>
+    <div class="nav-item disabled"><span data-i18n="nav.settings">Settings</span></div>
+    <div class="sidebar-foot" id="footVersion">—</div>
+  </div>
+
+  <div class="main">
+    <div class="main-head">
+      <div>
+        <h1 data-i18n="library.title">Library</h1>
+        <div class="sub" id="subtitle"></div>
+      </div>
+    </div>
+
+    <div class="error-banner" id="errorBanner"></div>
+
+    <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" onclick="closeDetail()"></div>
+<div class="detail" id="detail">
+  <div class="detail-hero">
+    <div class="detail-close" onclick="closeDetail()">✕</div>
+  </div>
+  <div class="detail-body">
+    <h2 id="dName">—</h2>
+    <div class="detail-author" id="dAuthor">—</div>
+    <div class="detail-badges">
+      <span class="pill" id="dStatus"></span>
+      <span class="pill" id="dVersion">—</span>
+      <span class="pill" id="dType">—</span>
+    </div>
+    <div class="detail-desc" id="dDesc">—</div>
+
+    <div class="detail-section">
+      <h4 data-i18n="library.detail.dependencies_heading">Dependencies</h4>
+      <div id="dDependencies"></div>
+    </div>
+
+    <div class="detail-section">
+      <h4 data-i18n="library.detail.files_heading">Installed files</h4>
+      <div id="dFiles"></div>
+    </div>
+
+    <div class="detail-actions">
+      <button class="btn" id="openFolderBtn" data-i18n="library.detail.open_folder_button">Open folder</button>
+      <button class="btn danger" id="deleteBtn" data-i18n="library.detail.delete_button">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-modal">
+    <h3 id="confirmTitle">—</h3>
+    <p id="confirmMessage">—</p>
+    <div class="confirm-actions">
+      <button class="btn" id="confirmCancelBtn">—</button>
+      <button class="btn danger" id="confirmOkBtn">—</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
