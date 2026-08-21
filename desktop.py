@@ -17,14 +17,18 @@ import webview
 from fastapi import FastAPI
 
 from backend.config import Config, ConfigError
+from backend.logging_config import configure_logging
 from backend.main import create_app
 
 HOST = "127.0.0.1"
 PORT = 8000
 
 
-def _start_server(app: FastAPI) -> uvicorn.Server:
-    server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT, log_level="warning"))
+def _start_server(app: FastAPI, log_level: str) -> uvicorn.Server:
+    # Reuses the same LOG_LEVEL as our own app logger (see logging_config.py)
+    # so one setting controls both, rather than uvicorn's access log staying
+    # hardcoded independent of it.
+    server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT, log_level=log_level.lower()))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     while not server.started:
@@ -39,8 +43,9 @@ def main() -> None:
         print(f"SimsLink configuration error: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    configure_logging(config)
     app = create_app(config)
-    server = _start_server(app)
+    server = _start_server(app, config.log_level)
     # Real-time detection of new downloads (Assisted Mode) and of external
     # changes under Mods/ — see backend/main.py's create_app() for why
     # neither is started there. The startup catch-up scan runs in its own

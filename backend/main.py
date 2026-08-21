@@ -18,16 +18,18 @@ throwaway temp Config/DB via FastAPI's TestClient.
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sqlite3
 import tempfile
 import threading
+import time
 import uuid
 import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -47,6 +49,8 @@ from .config import Config
 
 APP_VERSION = "0.1.0"  # keep in sync with pyproject.toml's [project].version
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+
+logger = logging.getLogger(__name__)
 
 
 class OpenExternalRequest(BaseModel):
@@ -127,6 +131,19 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
     app = FastAPI(title="SimsLink")
     db.init_db(db_path)
 
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        # DEBUG-level tracing of every request — distinct from the targeted
+        # INFO-level logging on individual mutating routes below, which
+        # covers user-meaningful actions (installed/enabled/deleted a mod,
+        # ...) rather than raw HTTP traffic. Configured via LOG_LEVEL; see
+        # logging_config.py.
+        start = time.monotonic()
+        response = await call_next(request)
+        duration_ms = (time.monotonic() - start) * 1000
+        logger.debug("%s %s -> %d (%.1fms)", request.method, request.url.path, response.status_code, duration_ms)
+        return response
+
     # Resolved once at app creation, not per-request — verify_key() is a
     # network call.
     direct_mode = False
@@ -136,6 +153,9 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
         if candidate.verify_key():
             direct_mode = True
             cf_client = candidate
+        else:
+            logger.warning("CURSEFORGE_API_KEY is set but was rejected — falling back to Assisted Mode")
+    logger.info("Starting in %s Mode", "Direct" if direct_mode else "Assisted")
 
     def require_client() -> curseforge.CurseForgeClient:
         if cf_client is None:
@@ -370,9 +390,11 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
         try:
             mod_manager.enable(mod_id, config=config, conn=conn)
         except dependencies.UnresolvedRequiredDependencyError as exc:
+            logger.warning("Enable blocked for %r: unresolved required dependency", mod_id)
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except mod_manager.ModManagerError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("Enabled mod %r", mod_id)
         return mod_summary(get_mod_row(mod_id, conn))
 
     @app.post("/api/mods/{mod_id}/disable")
@@ -382,6 +404,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             mod_manager.disable(mod_id, config=config, conn=conn)
         except mod_manager.ModManagerError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("Disabled mod %r", mod_id)
         return mod_summary(get_mod_row(mod_id, conn))
 
     @app.delete("/api/mods/{mod_id}")
@@ -391,6 +414,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             mod_manager.delete(mod_id, config=config, conn=conn)
         except mod_manager.ModManagerError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("Deleted mod %r", mod_id)
         return {"deleted": mod_id}
 
     @app.post("/api/mods/{mod_id}/open-folder")
@@ -507,6 +531,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except mod_manager.ModManagerError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("Installed mod %r from catalog (CurseForge #%d)", new_mod_id, curseforge_mod_id)
         return mod_summary(get_mod_row(new_mod_id, conn))
 
     @app.post("/api/open-external")
@@ -595,6 +620,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except (mod_manager.ModManagerError, download_watcher.DownloadWatcherError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("Applied update for mod %r -> CurseForge file #%d", new_mod_id, latest.file_id)
         return mod_summary(get_mod_row(new_mod_id, conn))
 
     # --- Crash Mode ----------------------------------------------------------------
@@ -648,6 +674,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
         # mod itself (CLAUDE.md: "Never silently auto-delete a mod based on
         # crash analysis"). Deleting it afterward is a separate Library action.
         crash_analyzer.confirm_faulty_mod(crash_log_id, payload.mod_id, conn)
+        logger.warning("Mod %r confirmed as faulty for crash_log_id=%d", payload.mod_id, crash_log_id)
         return {"confirmed": payload.mod_id}
 
     @app.get("/api/cache/targets")
@@ -664,6 +691,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
         # (CLAUDE.md: "always require confirmation before deleting"), this
         # route only executes once the user has already confirmed.
         cleaned = cache_cleaner.clean_cache(config)
+        logger.info("Cleared cache targets: %s", cleaned)
         return {"cleaned": cleaned}
 
     # --- Settings ------------------------------------------------------------------
@@ -678,6 +706,8 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             "download_watch_dir": str(config.download_watch_dir),
             "backup_retention_count": config.backup_retention_count,
             "mods_watcher_enabled": config.mods_watcher_enabled,
+            "log_level": config.log_level,
+            "log_path": str(config.log_path),
         }
 
     @app.post("/api/settings/full-scan")
@@ -737,6 +767,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except mod_manager.ModManagerError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("Activated profile %d", profile_id)
         return profile_dict(profiles_module.get_profile(profile_id, conn))
 
     # --- Blacklist -------------------------------------------------------------------

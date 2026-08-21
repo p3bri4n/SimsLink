@@ -15,6 +15,7 @@ ALL_ENV_VARS = (
     "GAME_VERSION",
     "BACKUP_RETENTION_COUNT",
     "MODS_WATCHER_ENABLED",
+    "LOG_LEVEL",
 )
 
 
@@ -135,6 +136,38 @@ def test_from_env_mods_watcher_enabled_rejects_unrecognized_value(tmp_path):
 
     with pytest.raises(ConfigError):
         Config.from_env(env_path)
+
+
+def test_from_env_log_level_defaults_to_info(tmp_path):
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.log_level == "INFO"
+
+
+def test_from_env_log_level_uses_explicit_value(tmp_path):
+    env_path = write_env_file(tmp_path, LOG_LEVEL="debug")
+
+    config = Config.from_env(env_path)
+
+    assert config.log_level == "DEBUG"  # normalized to uppercase
+
+
+def test_from_env_log_level_rejects_unknown_level(tmp_path):
+    env_path = write_env_file(tmp_path, LOG_LEVEL="VERBOSE")
+
+    with pytest.raises(ConfigError):
+        Config.from_env(env_path)
+
+
+def test_log_path_is_next_to_db_path(tmp_path):
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.log_path.parent == config.db_path.parent
+    assert config.log_path.name == "simslink.log"
 
 
 def test_has_api_key_true_for_non_blank_value(tmp_path):

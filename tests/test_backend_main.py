@@ -716,6 +716,7 @@ def test_get_settings_returns_configured_paths(app_config, client):
     assert body["library_dir"] == str(app_config.library_dir)
     assert body["backup_retention_count"] == app_config.backup_retention_count
     assert body["mods_watcher_enabled"] == app_config.mods_watcher_enabled
+    assert body["log_level"] == app_config.log_level
 
 
 def test_full_scan_rehashes_and_reports_stats(app_config, conn, tmp_path, client):

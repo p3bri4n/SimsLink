@@ -818,6 +818,19 @@ async function loadSettings() {
     )
   );
 
+  const loggingContainer = document.getElementById("settingsLogging");
+  loggingContainer.innerHTML = "";
+  [
+    ["settings.log_level_label", settings.log_level],
+    ["settings.log_path_label", settings.log_path],
+  ].forEach(([labelKey, value]) => {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    row.appendChild(elementWithText("span", null, t(labelKey)));
+    row.appendChild(elementWithText("span", "value", value));
+    loggingContainer.appendChild(row);
+  });
+
   renderScriptModsSetting();
 }
 

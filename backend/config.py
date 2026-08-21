@@ -20,6 +20,8 @@ REQUIRED_VARS = (
 DEFAULT_DOWNLOAD_WATCH_DIR = Path.home() / "Downloads"
 DEFAULT_BACKUP_RETENTION_COUNT = 5
 DEFAULT_MODS_WATCHER_ENABLED = True
+DEFAULT_LOG_LEVEL = "INFO"
+VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 _TRUTHY = {"1", "true", "yes", "on"}
 _FALSY = {"0", "false", "no", "off"}
@@ -50,6 +52,7 @@ class Config:
     game_version: str | None
     backup_retention_count: int = DEFAULT_BACKUP_RETENTION_COUNT
     mods_watcher_enabled: bool = DEFAULT_MODS_WATCHER_ENABLED
+    log_level: str = DEFAULT_LOG_LEVEL
 
     @property
     def has_api_key(self) -> bool:
@@ -63,6 +66,10 @@ class Config:
     @property
     def db_path(self) -> Path:
         return DEFAULT_DATA_DIR / "simslink.sqlite3"
+
+    @property
+    def log_path(self) -> Path:
+        return DEFAULT_DATA_DIR / "simslink.log"
 
     @classmethod
     def from_env(cls, env_path: Path | None = None) -> Config:
@@ -85,6 +92,7 @@ class Config:
             default=DEFAULT_MODS_WATCHER_ENABLED,
             var_name="MODS_WATCHER_ENABLED",
         )
+        log_level = _parse_log_level(values.get("LOG_LEVEL", ""))
 
         return cls(
             sims4_game_dir=Path(values["SIMS4_GAME_DIR"]).expanduser(),
@@ -100,6 +108,7 @@ class Config:
             game_version=game_version,
             backup_retention_count=backup_retention_count,
             mods_watcher_enabled=mods_watcher_enabled,
+            log_level=log_level,
         )
 
 
@@ -127,6 +136,15 @@ def _parse_bool(raw: str, *, default: bool, var_name: str) -> bool:
     raise ConfigError(
         f"{var_name} must be a boolean (1/0, true/false, yes/no, on/off), got: {raw!r}"
     )
+
+
+def _parse_log_level(raw: str) -> str:
+    normalized = raw.strip().upper()
+    if not normalized:
+        return DEFAULT_LOG_LEVEL
+    if normalized not in VALID_LOG_LEVELS:
+        raise ConfigError(f"LOG_LEVEL must be one of {VALID_LOG_LEVELS}, got: {raw!r}")
+    return normalized
 
 
 def detect_symlink_support(directory: Path) -> bool:
