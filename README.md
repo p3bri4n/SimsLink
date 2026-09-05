@@ -23,12 +23,11 @@ It's a personal, non-commercial, open-source project, built around respect for h
 
 ## Screenshots
 
-<!-- Placeholders — swap assets/screenshot-{1,2,3,4}.png for real captures whenever they're ready; the layout/links don't need to change. -->
 <table>
 <tr>
 <td width="25%"><a href="assets/screenshot-1.png"><img src="assets/screenshot-1.png" alt="Library view" width="100%"></a></td>
 <td width="25%"><a href="assets/screenshot-2.png"><img src="assets/screenshot-2.png" alt="Catalog view" width="100%"></a></td>
-<td width="25%"><a href="assets/screenshot-3.png"><img src="assets/screenshot-3.png" alt="Crash diagnosis" width="100%"></a></td>
+<td width="25%"><a href="assets/screenshot-3.png"><img src="assets/screenshot-3.png" alt="Duplicate/conflict/incompatibility warnings" width="100%"></a></td>
 <td width="25%"><a href="assets/screenshot-4.png"><img src="assets/screenshot-4.png" alt="Settings view" width="100%"></a></td>
 </tr>
 </table>
