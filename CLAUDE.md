@@ -295,6 +295,12 @@ Unit tests and regression tests are mandatory for this project, not optional. Ev
 
 Once the above testing expectations are met, follow the collaboration pattern this project already uses: freeze acceptance criteria before implementing, change one variable at a time when debugging platform-specific behavior (symlinks, filesystem quirks), and treat a passing test suite as the GO signal before moving to the next feature — not as an afterthought once everything "looks done."
 
+### Git workflow — branch protection, since 2026-09-05
+
+Both `main` and `dev` are protected on GitHub (`gh api repos/p3bri4n/SimsLink/branches/{branch}/protection`): no direct pushes to either one, not even from the repo owner/admin (`enforce_admins: true`) — everything lands via a pull request. A PR can only merge once the CI workflow's `test` check is green (`required_status_checks`, `strict: true` — the branch must also be up to date with its base). No approving review is required (`required_approving_review_count: 0`) — solo-maintainer repo, requiring a review would just block merging your own PRs. Force-pushes and branch deletion are both disabled on both branches.
+
+Practical shape this gives the workflow: every change gets its own branch off `dev`, named `fix/<short-description>` or `feat/<short-description>` depending on which it is — never commit straight to `dev` or `main`. Open a PR into `dev`, let CI run, merge once green. Periodically, when `dev` is in a shippable state, a PR from `dev` into `main` is what actually ships a release.
+
 ## Current project status
 
 - **FastAPI + pywebview is the app, as of 2026-08-21.** The prior Flet UI (`ui/*.py`, root `main.py`, `i18n/`) has been removed — `backend/` + `frontend/` + `desktop.py` (`simslink` script entry) is the only implementation now, covering all five views (Library, Catalog, Updates, Crash Mode, Settings). Visual design followed `simslink-mockup.html` (the file itself removed 2026-09-05 once the real frontend had long since superseded it as the actual reference). All business-logic modules physically moved under `backend/` in the same change (cross-module imports are now relative — `from . import mod_manager`, etc.); watch for this if grepping old commits/notes for bare `import mod_manager`-style imports, which no longer resolve.
