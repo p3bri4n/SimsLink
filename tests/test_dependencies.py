@@ -85,6 +85,34 @@ def test_required_dependency_unresolved_when_target_disabled(app_config, conn, t
         mod_manager.enable(mod_id, config=app_config, conn=conn)
 
 
+def test_regression_check_required_ignores_suggested_dependencies(app_config, conn, tmp_path):
+    """A 'suggested' required dependency (e.g. curseforge_dependencies.py's
+    auto-detected rows) must never block enable() on its own — only a
+    'confirmed' one may. Before this fix, check_required() only filtered on
+    dependency_type, not confidence, so the very first automated 'required'
+    suggestion would have silently blocked enable() before the user ever
+    agreed to anything — exactly what "suggestion is not confirmation"
+    forbids everywhere else in this app."""
+    mod_id = _install_mod(app_config, conn, tmp_path, "Needs Core")
+    mod_manager.disable(mod_id, config=app_config, conn=conn)
+    core_id = _install_mod(app_config, conn, tmp_path, "Core Lib", filename="core.package")
+    mod_manager.disable(core_id, config=app_config, conn=conn)  # unresolved either way
+
+    dependency_id = deps.add_dependency(
+        mod_id, conn=conn, dependency_type="required", depends_on_mod_id=core_id, confidence="suggested"
+    )
+
+    mod_manager.enable(mod_id, config=app_config, conn=conn)  # must not raise while merely suggested
+    row = conn.execute("SELECT active FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["active"] == 1
+
+    mod_manager.disable(mod_id, config=app_config, conn=conn)
+    deps.confirm_dependency(dependency_id, conn)
+
+    with pytest.raises(deps.UnresolvedRequiredDependencyError):
+        mod_manager.enable(mod_id, config=app_config, conn=conn)
+
+
 def test_add_dependency_rejects_invalid_type(app_config, conn, tmp_path):
     mod_id = _install_mod(app_config, conn, tmp_path, "Some Mod")
 

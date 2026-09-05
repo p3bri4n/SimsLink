@@ -62,7 +62,6 @@ def app_config(tmp_path) -> Config:
         d.mkdir(parents=True, exist_ok=True)
     return Config(
         sims4_game_dir=game_dir,
-        sims4_mods_dir=mods_dir,
         sims4_user_dir=user_dir,
         library_dir=library_dir,
         curseforge_api_key=None,

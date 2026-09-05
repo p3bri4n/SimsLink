@@ -118,6 +118,115 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        5,
+        """
+        -- Profiles gained a timestamp so a saved "library state" shows when
+        -- it was captured, not just its name — nullable since profiles
+        -- created before this migration have no timestamp to backfill.
+        ALTER TABLE profiles ADD COLUMN created_date TEXT;
+        """,
+    ),
+    (
+        6,
+        """
+        -- Reminders for a mod that was deleted while it was still part of a
+        -- saved state (profiles.py's record_missing_mod_if_saved()) — name
+        -- and curseforge_url are captured at deletion time, before the
+        -- mods row (and, via profile_mods' ON DELETE CASCADE, every
+        -- profile's membership record of it) disappears for good. No FK to
+        -- mods(id): the whole point is to outlive that row. UNIQUE on
+        -- mod_id so re-detecting the same missing mod (e.g. loading a
+        -- second stale save, or deleting it again after a reinstall) never
+        -- creates a duplicate reminder.
+        CREATE TABLE missing_mods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mod_id TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            curseforge_url TEXT,
+            source_profile_names TEXT NOT NULL,
+            detected_date TEXT NOT NULL
+        );
+        """,
+    ),
+    (
+        7,
+        """
+        -- Generic key/value overrides, so far used only by path_settings.py
+        -- for the three editable installation paths (SIMS4_GAME_DIR,
+        -- SIMS4_USER_DIR, LIBRARY_DIR) — layered on top of the .env-derived
+        -- Config at startup (config.py's from_env() stays the bootstrap;
+        -- this is what lets Settings change them afterward without editing
+        -- .env by hand).
+        CREATE TABLE settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        """,
+    ),
+    (
+        8,
+        """
+        -- Marks a mod adopted from a loose .package/.ts4script file sitting
+        -- directly at Mods/ root (loose_mods.py's import_loose_files()) —
+        -- surfaced as a "Loose"/"Vrac" tag so it's easy to tell apart from a
+        -- mod installed through a normal archive, and to find later for
+        -- loose_mods.suggest_groupings()'s "these look related" merge tool.
+        ALTER TABLE mods ADD COLUMN is_loose_import INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
+    (
+        9,
+        """
+        -- A manual correction for the Library's inferred grouping label
+        -- (frontend/app.js's groupingAuthor()) — that label is frequently a
+        -- *guessed* mod/series namespace (a bracket prefix, or a
+        -- shared-name-segments cluster), not a confirmed author, and the
+        -- guess can be wrong or nonsensical. Deliberately a separate column
+        -- from `author` (real data, only ever populated from CurseForge)
+        -- rather than overwriting it — this is "how I want this mod grouped
+        -- in my Library," not a claim about who made it. NULL means no
+        -- manual correction; grouping falls back to the normal
+        -- author/prefix/cluster inference.
+        ALTER TABLE mods ADD COLUMN namespace_override TEXT;
+        """,
+    ),
+    (
+        10,
+        """
+        -- The mod's real, human-authored name as CurseForge itself has it —
+        -- distinct from `name` (the locally-derived name a mod was installed
+        -- under, e.g. a raw filename for a loose import: see loose_mods.py).
+        -- NULL until curseforge_match.py's _apply_match() (or a future
+        -- catalog-install path) fills it in. The frontend prefers this over
+        -- `name` whenever it's set, and — unlike `name` — it's never subject
+        -- to the "Simplified names" toggle's stripping/cleanup, since it's
+        -- already the real, correct name rather than something guessed at
+        -- from messy local text.
+        ALTER TABLE mods ADD COLUMN curseforge_name TEXT;
+        """,
+    ),
+    (
+        11,
+        """
+        -- Tracks exactly which mods compat_quarantine.py's "disable
+        -- incompatible mods (+ their local required dependents)" action
+        -- turned off, so release_ready_mods() can bring back precisely
+        -- those once each one's own compat_status clears up after a
+        -- CurseForge resync — deliberately not a full active-set snapshot
+        -- like profiles.py's save/load, just the mods this one action is
+        -- responsible for. `reason` is 'incompatible' for a seed mod, or the
+        -- mod_id of the dependency that pulled a dependent mod in via the
+        -- cascade. ON DELETE CASCADE: nothing to reactivate once the mod
+        -- itself is gone.
+        CREATE TABLE compat_quarantine (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mod_id TEXT NOT NULL UNIQUE REFERENCES mods(id) ON DELETE CASCADE,
+            reason TEXT NOT NULL,
+            quarantined_date TEXT NOT NULL
+        );
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

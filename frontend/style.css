@@ -20,35 +20,13 @@
   --warn-glow: rgba(255,106,71,0.18);
   --danger: #FF3B3B;
   --danger-glow: rgba(255,59,59,0.18);
-  --unknown: #5C7674;
+  --purple: #B983FF;
+  --purple-glow: rgba(185,131,255,0.18);
   --radius: 10px;
   --font-display: 'Space Grotesk', sans-serif;
   --font-body: 'Inter', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
 }
-
-/* Light theme — opt-in via <html data-theme="light">, set by app.js from a
-   Settings toggle (persisted in localStorage; see the inline <head> script
-   in index.html that applies it before first paint to avoid a flash). Dark
-   stays the bare :root default above, matching the original design. */
-:root[data-theme="light"] {
-  --bg: #F2F6F5;
-  --panel: #FFFFFF;
-  --panel-raised: #F6FAF9;
-  --border: #DCE6E3;
-  --text: #16211F;
-  --text-dim: #4E6D67;
-  --text-faint: #7C948F;
-  --accent: #1D8F68;
-  --accent-dim: #33E6A6;
-  --accent-glow: rgba(29,143,104,0.14);
-  --warn: #C94A2E;
-  --warn-glow: rgba(201,74,46,0.12);
-  --danger: #D32F2F;
-  --danger-glow: rgba(211,47,47,0.14);
-  --unknown: #93A9A4;
-}
-:root[data-theme="light"] body { background-image: none; }
 
 * { box-sizing: border-box; }
 
@@ -84,7 +62,6 @@ body {
 }
 .gem.pulse { animation: pulse 2.2s ease-in-out infinite; }
 .gem.warn { background: var(--warn); }
-.gem.unknown { background: var(--unknown); }
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
   50% { box-shadow: 0 0 0 6px var(--accent-glow); }
@@ -101,8 +78,8 @@ body {
   background: rgba(17,26,27,0.7);
   backdrop-filter: blur(8px);
 }
-.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
-.brand .gem { width: 14px; height: 14px; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 700; font-size: 22px; letter-spacing: -0.01em; }
+.brand-logo { width: 32px; height: 32px; border-radius: 7px; flex-shrink: 0; }
 
 .search-wrap { position: relative; width: 360px; }
 .search-wrap input {
@@ -110,7 +87,7 @@ body {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 9px 14px 9px 34px;
+  padding: 9px 30px 9px 34px;
   color: var(--text);
   font-family: var(--font-body);
   font-size: 13.5px;
@@ -119,6 +96,14 @@ body {
 }
 .search-wrap input:focus { border-color: var(--accent-dim); }
 .search-wrap svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); opacity: .5; }
+.search-clear-btn {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%;
+  background: transparent; color: var(--text-faint);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1; cursor: pointer;
+}
+.search-clear-btn:hover { color: var(--text); background: var(--panel-raised); }
 
 .mode-pill {
   display: flex; align-items: center; gap: 8px;
@@ -132,6 +117,23 @@ body {
   user-select: none;
 }
 .mode-pill span.label { color: var(--text); }
+
+/* Groups the "My game crashed"/"Clear cache" popup triggers with the mode
+   pill on the topbar's right edge, both wrapped in one flex item — keeps
+   .topbar's own justify-content: space-between from spreading them apart
+   from each other as if they were independent top-level sections. */
+.topbar-right { display: flex; align-items: center; gap: 16px; }
+.topbar-actions-wrap { position: relative; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-actions .btn { padding: 7px 12px; font-size: 12.5px; }
+/* Floats below the buttons instead of participating in .topbar's fixed
+   64px row height (see .app's grid-template-rows) — same floating-panel
+   approach as .state-dropdown. */
+.header-error-banner {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  width: 320px; margin: 0; z-index: 60;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+}
 
 /* ---------- Sidebar ---------- */
 .sidebar {
@@ -218,9 +220,11 @@ body {
   border-radius: 8px;
   margin-bottom: 16px;
   overflow: hidden;
+  --row-accent: var(--warn);
 }
+.conflicts-banner-head { display: flex; align-items: center; }
 .conflicts-toggle {
-  width: 100%;
+  flex: 1; min-width: 0;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px;
   background: none; border: none;
@@ -228,16 +232,131 @@ body {
   font-family: var(--font-body); font-size: 13px; font-weight: 600;
   cursor: pointer; text-align: left;
 }
+.conflicts-toggle .chevron, .missing-mods-toggle .chevron {
+  display: flex; flex-shrink: 0; transition: transform .15s ease;
+}
+.conflicts-toggle.collapsed .chevron, .missing-mods-toggle.collapsed .chevron { transform: rotate(-90deg); }
+.conflicts-dismiss-btn { flex-shrink: 0; margin-right: 10px; color: var(--warn); opacity: 0.7; }
+.conflicts-dismiss-btn:hover { opacity: 1; }
 .conflicts-list {
   padding: 0 14px 12px; display: flex; flex-direction: column; gap: 6px;
   max-height: 40vh; overflow-y: auto;
 }
 .conflicts-list .conflict-row {
-  font-size: 12.5px; color: var(--text-dim);
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  font-size: 12.5px; color: var(--text);
+  display: flex; align-items: center; gap: 10px;
 }
-.conflicts-list .conflict-row .kind { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
-.conflicts-list .conflict-row .btn { margin-left: auto; flex-shrink: 0; }
+.conflicts-list .conflict-row .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.conflicts-list .conflict-row .name { overflow-wrap: anywhere; }
+.conflicts-list .conflict-row .files {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere;
+}
+.conflicts-list .conflict-row .icon-btn { flex-shrink: 0; }
+/* Same "icon glued to the text, not pushed to the row's right edge"
+   treatment as .warning-list-row--tight below — reused here (higher
+   specificity needed to win over the plain .info rule above). */
+.conflicts-list .conflict-row.warning-list-row--tight .info { flex: 0 1 auto; }
+
+/* ---------- Generic collapsible warning-list banner (Library) — broken
+   mods / mods to unzip / duplicate mods. Same structure/behavior as
+   .conflicts-banner above (kept separate rather than merged into it to
+   avoid touching that already-working, already-tested markup/CSS), just
+   themeable via a --danger/--purple/--warn modifier and with room in the
+   head row for an optional bulk-action button next to the dismiss icon. ---------- */
+.warning-list-banner {
+  border-radius: 8px; margin-bottom: 16px; overflow: hidden; border: 1px solid;
+}
+.warning-list-banner-head { display: flex; align-items: center; gap: 8px; }
+.warning-list-toggle {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  background: none; border: none;
+  font-family: var(--font-body); font-size: 13px; font-weight: 600;
+  cursor: pointer; text-align: left;
+}
+.warning-list-toggle .chevron { display: flex; flex-shrink: 0; transition: transform .15s ease; }
+.warning-list-toggle.collapsed .chevron { transform: rotate(-90deg); }
+.warning-list-banner-head .btn-sm { flex-shrink: 0; }
+.warning-list-banner-head .btn-sm:disabled { opacity: 0.4; cursor: default; }
+.warning-list-dismiss-btn { flex-shrink: 0; margin-right: 10px; opacity: 0.7; }
+.warning-list-dismiss-btn:hover { opacity: 1; }
+.warning-list-body {
+  padding: 0 14px 12px; display: flex; flex-direction: column; gap: 6px;
+  max-height: 40vh; overflow-y: auto;
+}
+.warning-list-row {
+  font-size: 12.5px; color: var(--text);
+  display: flex; align-items: center; gap: 10px;
+}
+.warning-list-row .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.warning-list-row .name { overflow-wrap: anywhere; }
+.warning-list-row .files {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere;
+}
+.warning-list-row .icon-btn { flex-shrink: 0; }
+/* Duplicates/mergeable/cleanup banners: the icon(s) read as attached to
+   that row's own text, not aligned to the banner's right edge like the
+   broken/unzip banners' per-row actions — so .info doesn't flex-fill the
+   row here. Also reused on .conflict-row (the cleanup banner, see
+   style.css's .conflict-row rules) — same class name, same effect. */
+.warning-list-row--tight .info { flex: 0 1 auto; }
+/* Small colored marker in front of each single-line row — inherits
+   --row-accent from the enclosing banner's color modifier (--warn/
+   --purple/--danger below, or .conflicts-banner's own for the cleanup
+   list), so one rule covers every themed list without repeating a color
+   per banner. */
+.warning-list-row--tight .name::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--row-accent, var(--text-faint)); margin-right: 8px; vertical-align: middle;
+}
+
+.warning-list-banner--danger { background: var(--danger-glow); border-color: rgba(255,59,59,0.35); --row-accent: var(--danger); }
+.warning-list-banner--danger .warning-list-toggle,
+.warning-list-banner--danger .warning-list-dismiss-btn { color: var(--danger); }
+.warning-list-banner--purple { background: var(--purple-glow); border-color: rgba(185,131,255,0.35); --row-accent: var(--purple); }
+.warning-list-banner--purple .warning-list-toggle,
+.warning-list-banner--purple .warning-list-dismiss-btn { color: var(--purple); }
+.warning-list-banner--warn { background: var(--warn-glow); border-color: rgba(255,106,71,0.35); --row-accent: var(--warn); }
+.warning-list-banner--warn .warning-list-toggle,
+.warning-list-banner--warn .warning-list-dismiss-btn { color: var(--warn); }
+
+/* ---------- Missing-mods banner (Library) — reminder, not a problem, so the
+   calmer purple accent (shared with the "Zip" archive theme) rather than the
+   orange used for actual conflicts above. ---------- */
+.missing-mods-banner {
+  background: var(--purple-glow);
+  border: 1px solid rgba(185,131,255,0.35);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.missing-mods-toggle {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  background: none; border: none;
+  color: var(--purple);
+  font-family: var(--font-body); font-size: 13px; font-weight: 600;
+  cursor: pointer; text-align: left;
+}
+.missing-mods-list {
+  padding: 0 14px 12px; display: flex; flex-direction: column; gap: 6px;
+  max-height: 40vh; overflow-y: auto;
+}
+.missing-mods-list .missing-mod-row {
+  font-size: 12.5px; color: var(--text);
+  display: flex; align-items: center; gap: 10px;
+}
+.missing-mods-list .missing-mod-row .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.missing-mods-list .missing-mod-row .name { overflow-wrap: anywhere; }
+.missing-mods-list .missing-mod-row .meta { font-size: 11px; color: var(--text-dim); }
+.missing-mods-list .missing-mod-row .curseforge-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--purple); font-size: 12px; font-family: var(--font-body);
+  text-decoration: underline; flex-shrink: 0;
+}
+.missing-mods-list .missing-mod-row .icon-btn { flex-shrink: 0; }
 
 /* ---------- Catalog view — not in the original mockup ---------- */
 .search-row { display: flex; gap: 10px; margin-bottom: 18px; }
@@ -279,34 +398,74 @@ body {
   font-family: var(--font-display); font-size: 16px; font-weight: 700;
   color: var(--text); text-transform: uppercase; letter-spacing: 0.04em;
   margin-top: 10px;
+  cursor: pointer; user-select: none;
 }
 .author-group-header:first-child { margin-top: 0; }
 .author-group-header .rule { flex: 1; height: 1px; background: var(--border); }
-.grid.tile-compact {
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
-}
-.grid.tile-compact .thumb { flex-basis: 45%; }
-.grid.tile-compact .card-body { padding: 8px 10px 10px; }
-.grid.tile-compact .card-body p { display: none; } /* no room for the description at this size */
-
+.author-group-header .chevron { display: flex; color: var(--text-faint); transition: transform .15s ease; flex-shrink: 0; }
+.author-group-header.collapsed .chevron { transform: rotate(-90deg); }
+/* Hidden until hover — this label is often a guessed namespace, not a
+   confirmed author, so the correction affordance should be discoverable
+   without permanently cluttering every header with an icon. */
+.author-group-header .author-edit-btn { opacity: 0; text-transform: none; letter-spacing: normal; }
+.author-group-header:hover .author-edit-btn { opacity: 1; }
 .grid.grid-list-mode { display: flex; flex-direction: column; gap: 8px; }
 
-.head-controls { display: flex; align-items: center; gap: 14px; }
-.simplified-names-toggle {
-  display: flex; align-items: center; gap: 6px; cursor: pointer;
-  font-size: 12px; color: var(--text-dim); user-select: none;
+.head-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.head-icon-actions { display: flex; align-items: center; gap: 4px; }
+.state-dropdown-wrap { position: relative; }
+.state-dropdown {
+  position: absolute; top: calc(100% + 8px); left: 0;
+  width: 300px; max-height: 360px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+  padding: 10px; z-index: 60;
 }
-.simplified-names-toggle input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+.state-dropdown .list-row:last-child { margin-bottom: 0; }
+.state-row { padding: 8px 6px; border-radius: 8px; }
+.state-row:hover { background: var(--panel-raised); }
+.state-row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.state-row-top .name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.state-row-top .actions { display: flex; gap: 2px; flex-shrink: 0; }
+.state-row-meta { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+.switch-control { display: flex; align-items: center; gap: 8px; }
+.switch-label { font-size: 12px; color: var(--text-dim); user-select: none; white-space: nowrap; }
+.switch-buttons { display: flex; gap: 4px; background: var(--panel-raised); border-radius: 8px; padding: 3px; }
+.switch-btn {
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--text-faint); cursor: pointer;
+  width: 32px; height: 28px; border-radius: 6px;
+}
+.switch-btn:hover { color: var(--text-dim); }
+.switch-btn.active { background: var(--panel); color: var(--accent); }
 
 .view-toggle { display: flex; gap: 4px; background: var(--panel-raised); border-radius: 8px; padding: 3px; }
 .view-toggle-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 26px; border-radius: 6px; border: none;
+  width: 34px; height: 30px; border-radius: 6px; border: none;
   background: transparent; color: var(--text-faint); cursor: pointer;
 }
 .view-toggle-btn:hover { color: var(--text-dim); }
 .view-toggle-btn.active { background: var(--panel); color: var(--accent); }
+
+.type-filter-toggle { display: flex; gap: 4px; background: var(--panel-raised); border-radius: 8px; padding: 3px; }
+.type-filter-btn {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 10px; height: 26px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text-faint); cursor: pointer;
+  font-family: var(--font-body); font-size: 12px;
+}
+.type-filter-btn:hover { color: var(--text-dim); }
+.type-filter-btn.active { background: var(--panel); color: var(--accent); }
+
+.loose-filter-chip {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--panel-raised); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 12px; color: var(--text-dim); font-family: var(--font-body); font-size: 12px;
+  cursor: pointer;
+}
+.loose-filter-chip:hover { color: var(--text); }
+.loose-filter-chip.active { background: var(--accent-glow); border-color: var(--accent-dim); color: var(--accent); }
 
 .list-mod-row {
   display: flex; align-items: center; gap: 14px;
@@ -318,7 +477,12 @@ body {
 /* A broken/unmanaged mod folder (backend/broken_mods.py's 'unpacked_script'
    reason) — same treatment as .has-issue but red instead of orange, since
    this isn't merely a suspected conflict, it's confirmed non-functional. */
-.list-mod-row.is-broken { border-color: var(--danger); background: linear-gradient(var(--danger-glow), var(--danger-glow)), var(--panel); cursor: default; }
+.list-mod-row.is-broken { border-color: var(--danger); background: linear-gradient(var(--danger-glow), var(--danger-glow)), var(--panel); }
+/* 'unextracted_archive' gets its own purple theme instead of red — it's not
+   "broken" the way an extracted script is (nothing was corrupted, it's just
+   sitting unopened), so it reads as a distinct, less alarming category
+   (see brokenStateClass() in app.js). */
+.list-mod-row.is-archive { border-color: var(--purple); background: linear-gradient(var(--purple-glow), var(--purple-glow)), var(--panel); }
 /* Grayscale on top of the existing dimming — opacity alone still let
    accent-colored bits (badges, gems, the active-toggle pill) read as
    normal colors at 60%, which didn't look distinctly "off" at a glance in
@@ -327,13 +491,19 @@ body {
 .list-mod-row.is-inactive { opacity: 0.6; filter: grayscale(0.7); }
 .list-mod-row.is-inactive .info h3 { text-decoration: line-through; }
 .list-mod-row .avatar {
-  width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0;
+  /* 56px, up from 40px — a real thumbnail (.avatar-image below) reads much
+     better bigger; the row itself has no fixed height (flex, sized by its
+     tallest child), so this just grows the row a bit, nothing to rebalance
+     the way the square grid card's own .thumb needed. */
+  width: 56px; height: 56px; border-radius: 10px; flex-shrink: 0;
   background: linear-gradient(135deg, #22403A, #16302B);
   display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-display); font-weight: 700; font-size: 13px; color: rgba(255,255,255,0.25);
-  text-align: center; line-height: 1.1; overflow-wrap: anywhere; padding: 0 2px;
+  font-family: var(--font-display); font-weight: 700; font-size: 16px; color: rgba(255,255,255,0.25);
+  text-align: center; line-height: 1.1; overflow-wrap: anywhere; padding: 0 4px;
+  position: relative; overflow: hidden;
 }
-.list-mod-row .avatar.long { font-size: 9px; }
+.list-mod-row .avatar.long { font-size: 11px; }
+.avatar-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .list-mod-row .info { flex: 1; min-width: 0; }
 .list-mod-row .info h3 {
   font-family: var(--font-display); font-size: 14px; margin: 0 0 3px; font-weight: 600;
@@ -364,10 +534,17 @@ body {
 /* A broken/unmanaged mod folder — same idea as .has-issue but red instead
    of orange (confirmed non-functional, not merely a suspected conflict),
    and not clickable (there's no detail panel behind it). */
-.card.is-broken { border-color: var(--danger); background: linear-gradient(var(--danger-glow), var(--danger-glow)), var(--panel); cursor: default; }
-.card.is-broken:hover { border-color: var(--danger); transform: none; }
+.card.is-broken { border-color: var(--danger); background: linear-gradient(var(--danger-glow), var(--danger-glow)), var(--panel); }
+.card.is-broken:hover { border-color: var(--danger); }
+.card.is-archive { border-color: var(--purple); background: linear-gradient(var(--purple-glow), var(--purple-glow)), var(--panel); }
+.card.is-archive:hover { border-color: var(--purple); }
 .thumb {
-  flex: 0 0 38%;
+  /* 46%, up from 38% — a real CurseForge thumbnail (see .thumb-image
+     below) reads much better with more room; .card-body's own min-heights
+     were trimmed (its description dropped to a 1-line clamp) to keep this
+     fitting within the card's own aspect-ratio:1/1 square even at the
+     grid's smallest column width (230px). */
+  flex: 0 0 46%;
   background: linear-gradient(135deg, #22403A, #16302B);
   position: relative;
   display: flex; align-items: center; justify-content: center;
@@ -377,8 +554,11 @@ body {
   text-align: center; padding: 0 10px; overflow-wrap: anywhere;
 }
 .thumb .initial.long { font-size: 15px; }
+.thumb-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .icon-btn.repair-icon-btn { color: var(--danger); }
 .icon-btn.repair-icon-btn:hover { background: var(--danger-glow); }
+.icon-btn.unzip-icon-btn { color: var(--purple); }
+.icon-btn.unzip-icon-btn:hover { background: var(--purple-glow); }
 /* Every classification pill a card can carry (type, duplicate, broken,
    version, compat, disabled) lives in this one row, overlaid on the fixed-
    height thumbnail so its content never affects the card's own height —
@@ -391,10 +571,17 @@ body {
   font-size: 10px; font-family: var(--font-mono);
   padding: 3px 7px; border-radius: 5px; color: var(--text-dim);
 }
-.cc-badge.warn-badge { background: var(--warn-glow); color: var(--warn); }
-.cc-badge.danger-badge { background: var(--danger-glow); color: var(--danger); font-weight: 700; }
-.pill.warn-pill { background: var(--warn-glow); color: var(--warn); border-color: rgba(255,106,71,0.35); }
-.pill.danger-pill { background: var(--danger-glow); color: var(--danger); border-color: rgba(255,59,59,0.35); font-weight: 700; }
+/* Standalone (not scoped to .cc-badge) so the same modifier works whether
+   buildBadges() built a .cc-badge (grid card) or a .pill (list row) — both
+   already get their base padding/border/font from their own class, this
+   just overrides background/color. A previous version scoped these to
+   ".cc-badge.warn-badge"/".cc-badge.danger-badge" only, which silently
+   left every list-row "Duplicate"/"Cassé" pill uncolored (buildBadges()
+   always emits the same modifier class regardless of which base class the
+   caller asked for). */
+.warn-badge { background: var(--warn-glow); color: var(--warn); border-color: rgba(255,106,71,0.35); }
+.danger-badge { background: var(--danger-glow); color: var(--danger); font-weight: 700; border-color: rgba(255,59,59,0.35); }
+.archive-badge { background: var(--purple-glow); color: var(--purple); font-weight: 700; border-color: rgba(185,131,255,0.35); }
 .card.is-inactive .thumb { filter: grayscale(0.6) brightness(0.7); }
 .card.is-inactive .card-body { opacity: 0.55; }
 .card.is-inactive .card-body h3 { text-decoration: line-through; }
@@ -415,9 +602,19 @@ body {
    whole card shorter than one with a two-line title, defeating the equal-
    height goal above (grid's default row-stretch only equalizes cards
    within the same row, not across the whole grid). */
-.card-body p { font-size: 12px; color: var(--text-dim); margin: 0 0 10px; line-height: 1.45; min-height: 2.9em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* 1-line clamp, down from 2 — freed-up space went to the bigger .thumb
+   above instead; the description is still fully visible in the detail
+   panel, this is just the grid card's own space budget. */
+.card-body p { font-size: 12px; color: var(--text-dim); margin: 0 0 10px; line-height: 1.45; min-height: 1.45em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .card-meta { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); margin-top: auto; padding-top: 8px; }
 .card-meta-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* Whether the mod has a real curseforge_id — green+"Lié"/red+"Non lié" at
+   the left edge of the card's bottom meta row (see buildLinkStatusIndicator()
+   in app.js), opposite the toggle/action icons via .card-meta's own
+   space-between. */
+.link-status { display: flex; align-items: center; gap: 6px; color: var(--danger); }
+.link-status.is-linked { color: var(--accent); }
+.link-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
 .toggle {
   width: 30px; height: 17px; background: var(--border); border-radius: 100px; position: relative; cursor: pointer; flex-shrink: 0;
 }
@@ -434,6 +631,20 @@ body {
 .icon-btn:hover { color: var(--warn); background: var(--warn-glow); }
 .list-mod-row .icon-btn { margin-left: 4px; }
 
+/* Save/Load state buttons: unlike every other .icon-btn (delete, unzip,
+   repair, ...) these are everyday, non-destructive actions worth a visible
+   label, not just an icon + hover tooltip — and the accent (green) hover
+   fits "save/load" far better than .icon-btn's warning-orange, which reads
+   as danger. */
+.icon-label-btn {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 12px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  font-family: var(--font-body); font-size: 12px;
+  transition: color .12s, background .12s;
+}
+.icon-label-btn:hover { color: var(--accent); background: var(--accent-glow); }
+
 /* ---------- Detail panel ---------- */
 .overlay {
   position: fixed; inset: 0; background: rgba(8,13,13,0.55);
@@ -449,10 +660,25 @@ body {
   transform: translateX(100%);
   transition: transform .25s cubic-bezier(.16,1,.3,1);
   z-index: 41;
-  overflow-y: auto;
+  display: flex; flex-direction: column;
 }
 .detail.show { transform: translateX(0); }
-.detail-hero { height: 150px; background: linear-gradient(135deg, #22403A, #16302B); position: relative; }
+/* Only this scrolls — .detail-actions is a separate flex sibling below it,
+   so Open folder/Delete/etc. never move out of view (see index.html's
+   comment on #dActions). */
+.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.detail-hero {
+  height: 150px; background: linear-gradient(135deg, #22403A, #16302B); position: relative;
+  transition: background .15s ease;
+}
+/* Matches the card border/badge treatment for the same three states:
+   normal (default, green-tinted like the rest of the app), problematic
+   (orange, suspected conflict/blacklist match), broken (red, confirmed
+   non-functional folder — see isProblemMod()/renderBrokenDetail() in
+   app.js). */
+.detail-hero.is-problem { background: linear-gradient(135deg, #4A3620, #302016); }
+.detail-hero.is-broken { background: linear-gradient(135deg, #4A2020, #301616); }
+.detail-hero.is-archive { background: linear-gradient(135deg, #3A2A4A, #241830); }
 .detail-close {
   position: absolute; top: 14px; right: 14px;
   width: 30px; height: 30px; border-radius: 8px;
@@ -460,7 +686,7 @@ body {
   color: var(--text); display: flex; align-items: center; justify-content: center;
   cursor: pointer; font-size: 16px;
 }
-.detail-body { padding: 20px 22px 40px; }
+.detail-body { padding: 20px 22px; }
 .detail-body h2 { font-family: var(--font-display); font-size: 20px; margin: 0 0 4px; }
 .detail-author { font-size: 12.5px; color: var(--text-dim); margin-bottom: 16px; }
 .detail-badges { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
@@ -470,12 +696,58 @@ body {
   padding: 5px 10px; border-radius: 100px;
   background: var(--panel-raised); border: 1px solid var(--border); color: var(--text-dim);
 }
+/* A real, clickable button styled as a .pill (not a plain <a> — navigation
+   goes through openExternal()/POST /api/open-external so it always opens in
+   the system's default browser, never inside the app's own window). Shown
+   only when the mod is linked to a real CurseForge entry. */
+.detail-curseforge-link {
+  display: inline-flex; align-self: flex-start; margin-bottom: 18px;
+  cursor: pointer; color: var(--accent); border-color: var(--accent-dim);
+  transition: background .12s;
+}
+.detail-curseforge-link:hover { background: var(--accent-glow); }
 .detail-desc { font-size: 13.5px; line-height: 1.65; color: var(--text); margin-bottom: 22px; white-space: pre-wrap; }
+/* Compare-panel only (buildComparePanelNode()) — the on-disk library path,
+   a real distinguishing fact between two otherwise-identical duplicates. */
+.detail-location {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-faint);
+  margin-bottom: 18px; overflow-wrap: anywhere;
+}
 .detail-section { margin-bottom: 20px; }
 .detail-section h4 {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--text-faint); margin: 0 0 10px; font-weight: 600;
 }
+/* ---------- Dependency graph (renderDependencyGraph() in app.js) — a small
+   inline-SVG overview above the .dep-row list below. Color = dependency_type,
+   dashed border/edge = confidence 'suggested'. Node color comes from
+   `color` on each .dep-node--* class, read by the SVG shapes' own
+   stroke="currentColor" — same idiom the rest of this app's inline icon
+   SVGs already use. ---------- */
+.dep-graph svg { display: block; }
+.dep-node { cursor: pointer; }
+.dep-node rect { fill: var(--panel-raised); stroke: currentColor; stroke-width: 1.5; }
+.dep-node text { fill: var(--text); font-size: 10px; font-family: var(--font-body); }
+.dep-node--self { cursor: default; }
+.dep-node--self rect { fill: var(--accent-glow); stroke: var(--accent); stroke-width: 2; }
+.dep-node--self text { font-weight: 700; }
+.dep-node--required { color: var(--accent); }
+.dep-node--optional { color: var(--text-dim); }
+.dep-node--translation { color: var(--purple); }
+.dep-graph-edge { stroke: currentColor; stroke-width: 1.5; }
+.dep-node--suggested rect { stroke-dasharray: 4 3; }
+.dep-graph-edge.dep-node--suggested { stroke-dasharray: 4 3; }
+.dep-graph-legend {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  margin: 6px 0 14px; font-size: 10.5px; color: var(--text-faint);
+}
+.dep-graph-legend-item { display: flex; align-items: center; gap: 5px; }
+.dep-graph-legend-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
+/* Brief pulse when a graph node's row is scrolled into view — removed via
+   a JS timeout in highlightDependencyRow(), not a CSS animation, so it
+   doesn't re-trigger on every re-render. */
+.dep-row-highlight { outline: 2px solid var(--accent-dim); outline-offset: -2px; }
+
 .dep-row {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 9px 12px; background: var(--panel-raised); border-radius: 8px; margin-bottom: 6px;
@@ -506,11 +778,39 @@ body {
 .conflict-side .meta { display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 8px; }
 .conflict-side .actions { display: flex; gap: 6px; }
 .file-row { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); padding: 5px 0; border-bottom: 1px dashed var(--border); }
+/* Bounded and independently scrollable — a mod can list thousands of
+   files, which would otherwise dominate .detail-scroll's own scroll
+   height (see CLAUDE.md's file-count reality). */
+.detail-files-scroll {
+  max-height: 260px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px;
+}
+.detail-files-scroll .file-row:last-child { border-bottom: none; }
 
 .crash-report-block { margin-bottom: 22px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .crash-report-block:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-.detail-actions { display: flex; gap: 8px; margin-top: 6px; }
-.detail-actions .btn { flex: 1; justify-content: center; }
+/* Sticky footer, not part of .detail-scroll — see that rule's own comment. */
+.detail-actions {
+  display: flex; gap: 8px; flex-shrink: 0;
+  padding: 14px 22px; border-top: 1px solid var(--border); background: var(--panel);
+}
+.detail-actions-broken { display: flex; gap: 8px; }
+/* Bigger, bordered variant of the card-level .icon-btn — this is the sole
+   way to reach these actions (no equivalent text button anywhere else in
+   the panel), so it reads as a real button, not a stray small icon. */
+.detail-icon-btn {
+  width: 34px; height: 34px; border-radius: 8px;
+  background: var(--panel-raised); border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.detail-icon-btn:hover { color: var(--text); background: var(--panel); border-color: var(--accent-dim); }
+.detail-icon-btn.danger { color: var(--warn); border-color: rgba(255,106,71,0.3); }
+.detail-icon-btn.danger:hover { background: var(--warn-glow); }
+.detail-icon-btn.repair-icon-btn { color: var(--danger); border-color: rgba(255,86,86,0.3); }
+.detail-icon-btn.repair-icon-btn:hover { background: var(--danger-glow); }
+.detail-icon-btn.unzip-icon-btn { color: var(--purple); border-color: rgba(185,131,255,0.3); }
+.detail-icon-btn.unzip-icon-btn:hover { background: var(--purple-glow); }
+.detail-icon-btn.active-on { color: var(--accent); border-color: var(--accent-dim); }
 
 /* ---------- Confirm modal (delete) — not in the original mockup ---------- */
 .confirm-overlay {
@@ -533,6 +833,47 @@ body {
 .confirm-modal p { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 18px; }
 #confirmExtra:not(:empty) { margin-bottom: 18px; display: flex; flex-direction: column; gap: 6px; }
 .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+/* Crash diagnosis modal: wider than the plain single-question confirm
+   modal (suspect lines/bisection rounds need more horizontal room), and
+   its own head row since it has a close (✕) button instead of Cancel/OK. */
+.confirm-modal--wide { width: 520px; }
+.confirm-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.confirm-modal-head h3 { margin: 0; }
+.modal-close-btn {
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  background: rgba(17,26,27,0.6); border: 1px solid var(--border);
+  color: var(--text); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 14px; padding: 0;
+}
+.modal-close-btn:hover { border-color: var(--accent-dim); }
+/* CurseForge match popup's progress bar (openMatchCurseforgeModal()). */
+.progress-bar-track {
+  width: 100%; height: 8px; background: var(--panel-raised); border-radius: 100px;
+  overflow: hidden; margin: 4px 0 18px;
+}
+.progress-bar-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 100px; transition: width .2s ease; }
+/* Checkbox-per-archive list for confirmExtractZips() — a folder with 2+
+   archives needs the user to pick one or several, not just confirm a
+   single fixed action. */
+.zip-choice-list { display: flex; flex-direction: column; gap: 8px; }
+.zip-choice {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+  padding: 6px 8px; border-radius: 6px; background: var(--panel-raised);
+}
+.zip-choice input[type="checkbox"], .zip-choice input[type="radio"] { accent-color: var(--purple); cursor: pointer; flex-shrink: 0; }
+
+/* Clear-cache confirm modal's target list — real on-disk name (with
+   extension when there is one) kept verbatim on its own monospace line
+   rather than folded into a simplified sentence, plus an open-location icon. */
+.cache-target-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px; border-radius: 6px; background: var(--panel-raised);
+}
+.cache-target-row .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cache-target-row .name { font-family: var(--font-mono); font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+.cache-target-row .desc { font-size: 11px; color: var(--text-faint); }
+.cache-target-row .icon-btn { flex-shrink: 0; }
 
 /* ---------- Crash Mode / Settings — not in the original mockup ---------- */
 select {
@@ -545,6 +886,15 @@ select {
   padding: 9px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px;
 }
 .settings-row .value { font-family: var(--font-mono); color: var(--text-dim); text-align: right; word-break: break-all; }
+
+.settings-path-field {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 9px 0; border-bottom: 1px dashed var(--border);
+}
+.settings-path-field label { font-size: 12.5px; }
+.settings-path-input-row { display: flex; gap: 8px; align-items: center; }
+.settings-path-field .text-input { font-family: var(--font-mono); font-size: 12.5px; flex: 1; min-width: 0; }
+.settings-path-input-row .btn { flex-shrink: 0; padding: 8px 10px; }
 
 .text-input {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -562,6 +912,11 @@ select {
 .list-row .info .note { color: var(--text-faint); font-size: 11px; margin-left: 6px; }
 .list-row .actions { display: flex; gap: 6px; flex-shrink: 0; }
 
+.loose-suggestion-row { align-items: stretch; justify-content: flex-start; flex-direction: column; gap: 8px; }
+.loose-suggestion-row .members { color: var(--text-dim); font-size: 11.5px; }
+.loose-suggestion-row .text-input { width: 100%; }
+.loose-suggestion-row .actions { width: 100%; justify-content: flex-end; }
+
 .warning-banner {
   display: flex; align-items: center; gap: 8px;
   background: var(--warn-glow);
@@ -572,3 +927,76 @@ select {
   color: var(--warn);
   font-size: 13px; font-weight: 600;
 }
+
+/* ---------- Comparison panel (duplicates / mergeable mods) — replaces the
+   old side-by-side "one full .detail panel per mod" layout, which needed a
+   custom horizontal-wheel-scroll fix that broke repeatedly with a large
+   group (three separate fix attempts, still not reliable — see CLAUDE.md)
+   and buried the one fact that actually helps a decision (the on-disk
+   folder name for duplicates, the linked/unlinked reliability signal for a
+   merge) under a wall of per-mod detail that's mostly identical across the
+   group anyway. Now: a single slide-in panel (reuses .detail's shell —
+   position/width/transition), holding a plain vertical list of compact
+   cards — native vertical scroll, no custom wheel handling needed
+   regardless of how many mods are in a group. ---------- */
+.compare-panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 18px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.compare-panel-head h3 { font-family: var(--font-display); font-size: 16px; margin: 0; }
+.compare-panel-instructions {
+  font-size: 12.5px; color: var(--text-dim); line-height: 1.5;
+  padding: 12px 20px 0; margin: 0; flex-shrink: 0;
+}
+/* Reliability is a property of the whole suggested merge group (a
+   confirmed shared curseforge_id vs. just a name-prefix guess — see
+   loose_mods.suggest_groupings()), shown once here rather than repeated on
+   every card below. --is-linked/--is-unlinked reuse the same green/orange
+   language as the rest of this app (accent = confirmed-good, warn =
+   proceed-with-caution). */
+.compare-panel-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 20px 0; padding: 10px 14px; border-radius: 8px;
+  font-size: 12.5px; line-height: 1.5; flex-shrink: 0;
+}
+.compare-panel-banner.is-linked { background: var(--accent-glow); border: 1px solid var(--accent-dim); color: var(--accent); }
+.compare-panel-banner.is-unlinked { background: var(--warn-glow); border: 1px solid rgba(255,106,71,0.35); color: var(--warn); }
+.compare-panel-banner svg { flex-shrink: 0; }
+
+.compare-card-list { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+
+/* Duplicate comparator: the whole card is the "keep this one, delete the
+   rest" click target (see resolveDuplicateSelection() in app.js) — no
+   separate action button needed, .dup-compare-keep-hint below is purely a
+   visual affordance. */
+.dup-compare-card {
+  background: var(--panel-raised); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; cursor: pointer; transition: background .12s, border-color .12s;
+}
+.dup-compare-card:hover { background: var(--panel); border-color: var(--accent-dim); }
+.dup-compare-card-folder {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 13px; color: var(--text); margin-bottom: 4px;
+}
+.dup-compare-card-folder svg { flex-shrink: 0; color: var(--text-faint); }
+/* The trailing "(1)"/"-copy"/etc. splitFolderSuffix() (app.js) detects on
+   the folder name — the real, visible tell that this install was a copy,
+   so it's called out in color rather than blending into the rest of the
+   name. */
+.dup-folder-suffix { color: var(--warn); font-weight: 700; }
+.dup-compare-card-name { font-size: 12px; color: var(--text-dim); margin-bottom: 2px; }
+.dup-compare-card-meta { font-size: 11px; color: var(--text-faint); margin-bottom: 8px; }
+.dup-compare-keep-hint { color: var(--accent); border-color: var(--accent-dim); }
+
+/* Merge comparator: checkbox-select, not a click target — see
+   buildMergeCompareCard() in app.js. */
+.merge-compare-card {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel-raised); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 14px;
+}
+.merge-compare-card label { display: flex; align-items: center; gap: 10px; cursor: pointer; width: 100%; }
+.merge-compare-card input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+.merge-compare-card-name { font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
+
+#mergeCompareNameInput { flex: 1; min-width: 0; }

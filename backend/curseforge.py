@@ -4,13 +4,14 @@ The only module allowed to require CURSEFORGE_API_KEY. Nothing on the
 Assisted Mode code path imports or calls this module (see download_watcher.py
 and brief section 4bis).
 
-This has never been exercised against the real API: per CLAUDE.md's "Current
-project status", no key has been approved yet (application pending at
-console.curseforge.com). The endpoint paths below follow CurseForge's
-published REST API structure, but exact JSON field names may need
-adjustment once real responses are available — _parse_mod()/_parse_file()
-are isolated specifically so that fixing a field name later doesn't ripple
-through the rest of the client. The game's numeric CurseForge id is likewise
+A real API key has since been added and verified (see CLAUDE.md's "Current
+project status", 2026-08-23) — search_mods()/get_mod()/get_files() and the
+fingerprint-matching pair (curseforge_fingerprint()/match_fingerprints()/
+get_mods()) have all been exercised against the real API at least once, so
+the response shapes _parse_mod()/_parse_file() rely on are confirmed
+correct for this game, not just guessed from the published REST structure.
+_parse_mod()/_parse_file() stay isolated regardless, in case a field ever
+does need adjusting later. The game's numeric CurseForge id is likewise
 never hardcoded (a guessed id that's wrong would silently return empty
 results) — game_id() resolves it once by name via /games and caches it.
 
@@ -21,6 +22,7 @@ July 16, 2026 (see CLAUDE.md's "Things to never do").
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,8 +33,59 @@ _SIMS4_GAME_NAME = "The Sims 4"
 _REQUEST_TIMEOUT = 15
 _DOWNLOAD_TIMEOUT = 30
 _DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+FINGERPRINT_BATCH_SIZE = 500  # public: callers batch match_fingerprints()/get_mods() themselves
 
 _RELEASE_TYPES = {1: "release", 2: "beta", 3: "alpha"}
+
+_FP_MASK32 = 0xFFFFFFFF
+_FP_WHITESPACE_BYTES = (0x09, 0x0A, 0x0D, 0x20)  # tab, LF, CR, space
+
+
+def curseforge_fingerprint(data: bytes) -> int:
+    """CurseForge's own file-identification scheme — a 32-bit MurmurHash2
+    (seed 1) computed after stripping whitespace bytes from the file. This
+    is the exact mechanism the official CurseForge app uses to recognize a
+    file dropped in by hand ("fingerprint matching"); it's platform-wide,
+    not specific to any one game, and verified directly against the real
+    API for Sims 4 content (see CLAUDE.md's fingerprint-matching notes) —
+    every exact match checked so far correctly identified both the right
+    mod and the right file variant (e.g. the right translation).
+    """
+    filtered = bytes(b for b in data if b not in _FP_WHITESPACE_BYTES)
+    return _murmur2_32(filtered, 1)
+
+
+def _murmur2_32(data: bytes, seed: int) -> int:
+    # struct.unpack_from does the 4-byte-word extraction in C — the mixing
+    # loop itself is still one Python-level iteration per word, so this is
+    # still too slow for library-scale batches over very large files (a
+    # few hundred MB): see curseforge_match.py's own size cap for why that
+    # case is deliberately skipped rather than optimized further here.
+    m = 0x5BD1E995
+    r = 24
+    length = len(data)
+    h = (seed ^ length) & _FP_MASK32
+    nwords = length // 4
+    if nwords:
+        for k in struct.unpack_from(f"<{nwords}I", data, 0):
+            k = (k * m) & _FP_MASK32
+            k ^= k >> r
+            k = (k * m) & _FP_MASK32
+            h = (h * m) & _FP_MASK32
+            h ^= k
+    tail_start = nwords * 4
+    tail_len = length - tail_start
+    if tail_len == 3:
+        h ^= data[tail_start + 2] << 16
+    if tail_len >= 2:
+        h ^= data[tail_start + 1] << 8
+    if tail_len >= 1:
+        h ^= data[tail_start]
+        h = (h * m) & _FP_MASK32
+    h ^= h >> 13
+    h = (h * m) & _FP_MASK32
+    h ^= h >> 15
+    return h & _FP_MASK32
 
 
 class CurseForgeError(Exception):
@@ -44,6 +97,12 @@ class CurseForgeAuthError(CurseForgeError):
 
 
 @dataclass(frozen=True)
+class CurseForgeFileDependency:
+    mod_id: int
+    relation_type: int  # raw CurseForge FileRelationType enum — interpreted in curseforge_dependencies.py
+
+
+@dataclass(frozen=True)
 class CurseForgeFile:
     file_id: int
     file_name: str
@@ -51,6 +110,7 @@ class CurseForgeFile:
     game_version_min: str | None
     game_version_max: str | None
     release_type: str
+    dependencies: tuple[CurseForgeFileDependency, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -63,6 +123,7 @@ class CurseForgeMod:
     thumbnail_url: str | None
     curseforge_url: str | None
     third_party_distribution_allowed: bool
+    main_file_id: int | None = None
 
 
 def compat_status(
@@ -87,6 +148,31 @@ def _version_tuple(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
 
 
+def _min_max_game_versions(game_versions: list[str]) -> tuple[str | None, str | None]:
+    """Regression, found 2026-08-24: a file's `gameVersions` (e.g.
+    ["1.99", "1.100", "1.101"]) used to be reduced via plain min()/max() over
+    the raw strings — lexicographic, not numeric, so "1.100" sorted *below*
+    "1.99" the moment the game crossed .99 into triple digits, silently
+    producing a wrong game_version_min/max and a wrong compat_status badge
+    even though compat_status() itself does a real numeric comparison once
+    it receives these values. Now sorts by _version_tuple() (the same
+    numeric parser compat_status() already trusts) whenever every entry
+    parses cleanly; a single unparseable entry (unexpected — CurseForge's
+    gameVersions for this game has always been plain dotted numbers so far,
+    but nothing guarantees that forever) falls back to the old lexicographic
+    behavior for the whole list rather than crashing on a genuinely
+    malformed response."""
+    if not game_versions:
+        return None, None
+    try:
+        return (
+            min(game_versions, key=_version_tuple),
+            max(game_versions, key=_version_tuple),
+        )
+    except ValueError:
+        return min(game_versions), max(game_versions)
+
+
 def _parse_mod(data: dict) -> CurseForgeMod:
     authors = data.get("authors") or []
     categories = data.get("categories") or []
@@ -102,18 +188,24 @@ def _parse_mod(data: dict) -> CurseForgeMod:
         # here only costs an extra "Open on CurseForge" fallback, not a
         # blocked download of something that was actually fine.
         third_party_distribution_allowed=data.get("allowModDistribution") is not False,
+        main_file_id=data.get("mainFileId"),
     )
 
 
 def _parse_file(data: dict) -> CurseForgeFile:
     game_versions = data.get("gameVersions") or []
+    game_version_min, game_version_max = _min_max_game_versions(game_versions)
     return CurseForgeFile(
         file_id=data["id"],
         file_name=data.get("fileName", ""),
         download_url=data.get("downloadUrl"),
-        game_version_min=min(game_versions) if game_versions else None,
-        game_version_max=max(game_versions) if game_versions else None,
+        game_version_min=game_version_min,
+        game_version_max=game_version_max,
         release_type=_RELEASE_TYPES.get(data.get("releaseType"), "unknown"),
+        dependencies=tuple(
+            CurseForgeFileDependency(mod_id=dep["modId"], relation_type=dep["relationType"])
+            for dep in data.get("dependencies") or []
+        ),
     )
 
 
@@ -178,9 +270,85 @@ class CurseForgeClient:
         payload = self._request("GET", f"/mods/{mod_id}")
         return _parse_mod(payload["data"])
 
+    def get_mods(self, mod_ids: list[int]) -> list[CurseForgeMod]:
+        """Bulk counterpart to get_mod() — one request for many ids, used
+        after match_fingerprints() to fetch full metadata (author,
+        thumbnail, ...) for every distinct mod a batch of fingerprints
+        resolved to, instead of one request per match."""
+        if not mod_ids:
+            return []
+        payload = self._request("POST", "/mods", json={"modIds": mod_ids})
+        return [_parse_mod(item) for item in payload.get("data", [])]
+
+    def match_fingerprints(self, fingerprints: list[int]) -> dict[int, int]:
+        """Exact fingerprint matches only -> {fingerprint: curseforge_mod_id}.
+        CurseForge's own partial-match results are deliberately ignored —
+        a similarity guess, not a confirmed identity, same "suspicion is
+        not confirmation" rule this app applies everywhere else. Caller is
+        responsible for batching (see _FINGERPRINT_BATCH_SIZE) — this sends
+        exactly what it's given in one request.
+
+        Regression, found 2026-08-23 via a real-library data-integrity
+        incident (see CLAUDE.md): a prior version of this method paired the
+        response's top-level exactFingerprints with exactMatches
+        positionally (`zip(exactFingerprints, exactMatches)`), on the
+        assumption that both arrays line up 1:1, in request order. Verified
+        directly against the real API that this assumption is *wrong*:
+        exactFingerprints is simply an echo of every fingerprint that was
+        sent (same length and order as the request, matched or not), while
+        exactMatches only ever contains one entry per matched *file* —
+        and a single CurseForge file can bundle more than one of the
+        fingerprints we sent (e.g. its .package and its .ts4script,
+        submitted as two separate locally-loose mods, both listed under
+        that one file's `modules`). Whenever that happens, exactMatches is
+        shorter than exactFingerprints and every pairing after that point
+        silently shifts — which is exactly what corrupted curseforge_id for
+        a real, reproducible set of unrelated mods before this fix.
+
+        Now correlates by *content* instead of position: each exactMatches
+        entry's own file.modules[].fingerprint (or, for a match with no
+        modules, its file.fileFingerprint) is checked against what was
+        actually sent, so the mapping holds regardless of array length,
+        order, or how many of our fingerprints one matched file accounts
+        for. A fingerprint claimed by two different matches (contradictory,
+        should never legitimately happen) is dropped rather than guessed at.
+        """
+        if not fingerprints:
+            return {}
+        requested = set(fingerprints)
+        payload = self._request("POST", "/fingerprints", json={"fingerprints": fingerprints})
+        data = payload.get("data", {})
+        exact_matches = data.get("exactMatches") or []
+
+        result: dict[int, int] = {}
+        ambiguous: set[int] = set()
+        for match in exact_matches:
+            file_data = match["file"]
+            mod_id = file_data["modId"]
+            candidate_fingerprints = [module.get("fingerprint") for module in file_data.get("modules") or []]
+            if not candidate_fingerprints:
+                candidate_fingerprints = [file_data.get("fileFingerprint")]
+            for fp in candidate_fingerprints:
+                if fp not in requested:
+                    continue
+                if fp in result and result[fp] != mod_id:
+                    ambiguous.add(fp)
+                    continue
+                result[fp] = mod_id
+        for fp in ambiguous:
+            result.pop(fp, None)
+        return result
+
     def get_files(self, mod_id: int) -> list[CurseForgeFile]:
         payload = self._request("GET", f"/mods/{mod_id}/files")
         return [_parse_file(item) for item in payload.get("data", [])]
+
+    def get_file(self, mod_id: int, file_id: int) -> CurseForgeFile:
+        """Single-file counterpart to get_files() — used by
+        curseforge_dependencies.py to fetch just the mod's main file's own
+        declared dependencies, without pulling its whole version history."""
+        payload = self._request("GET", f"/mods/{mod_id}/files/{file_id}")
+        return _parse_file(payload["data"])
 
     def get_description(self, mod_id: int) -> str:
         payload = self._request("GET", f"/mods/{mod_id}/description")

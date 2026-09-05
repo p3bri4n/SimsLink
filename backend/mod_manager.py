@@ -224,7 +224,7 @@ def _finalize_install(
         _insert_mod_files(conn, mod_id, library_path, destinations)
         if after_copy is not None:
             after_copy()
-        _activate(mod_id, config)
+        activate_symlink(mod_id, config)
     except Exception:
         conn.rollback()
         shutil.rmtree(library_path, ignore_errors=True)
@@ -279,7 +279,13 @@ def _get_mod(conn: sqlite3.Connection, mod_id: str) -> sqlite3.Row:
     return row
 
 
-def _activate(mod_id: str, config: Config) -> None:
+# Public (not the usual leading-underscore module-private helper) because
+# path_settings.py also needs to recreate a mod's symlink against a
+# *different* Config than the one that removed the old one, when
+# SIMS4_USER_DIR/LIBRARY_DIR change via Settings — enable()/disable() below
+# always operate against a single, already-current config, which doesn't
+# fit that migration case.
+def activate_symlink(mod_id: str, config: Config) -> None:
     library_path = config.library_dir / mod_id
     link_path = config.sims4_mods_dir / mod_id
     if link_path.exists() or link_path.is_symlink():
@@ -291,7 +297,7 @@ def _activate(mod_id: str, config: Config) -> None:
         shutil.copytree(library_path, link_path)
 
 
-def _deactivate(mod_id: str, config: Config) -> None:
+def deactivate_symlink(mod_id: str, config: Config) -> None:
     link_path = config.sims4_mods_dir / mod_id
     if link_path.is_symlink():
         link_path.unlink()
@@ -302,23 +308,38 @@ def _deactivate(mod_id: str, config: Config) -> None:
 def enable(mod_id: str, *, config: Config, conn: sqlite3.Connection) -> None:
     _get_mod(conn, mod_id)
     dependencies.check_required(mod_id, conn)
-    _activate(mod_id, config)
+    activate_symlink(mod_id, config)
     conn.execute("UPDATE mods SET active = 1 WHERE id = ?", (mod_id,))
     conn.commit()
 
 
 def disable(mod_id: str, *, config: Config, conn: sqlite3.Connection) -> None:
     _get_mod(conn, mod_id)
-    _deactivate(mod_id, config)
+    deactivate_symlink(mod_id, config)
     conn.execute("UPDATE mods SET active = 0 WHERE id = ?", (mod_id,))
     conn.commit()
 
 
 def delete(mod_id: str, *, config: Config, conn: sqlite3.Connection) -> None:
     row = _get_mod(conn, mod_id)
-    _deactivate(mod_id, config)
+    deactivate_symlink(mod_id, config)
     library_path = Path(row["library_path"])
     if library_path.exists():
         shutil.rmtree(library_path)
     conn.execute("DELETE FROM mods WHERE id = ?", (mod_id,))
+    conn.commit()
+
+
+def set_namespace_override(mod_id: str, value: str | None, *, conn: sqlite3.Connection) -> None:
+    """Manually corrects the Library's inferred grouping label for one mod
+    — see the `namespace_override` column comment in db.py for why this is
+    a separate field from `author` rather than overwriting it. `value=None`
+    (or an empty/whitespace-only string) clears the override, reverting
+    that mod to normal author/prefix/cluster inference.
+    """
+    _get_mod(conn, mod_id)
+    normalized = value.strip() if value else None
+    conn.execute(
+        "UPDATE mods SET namespace_override = ? WHERE id = ?", (normalized or None, mod_id)
+    )
     conn.commit()

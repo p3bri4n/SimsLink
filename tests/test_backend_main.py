@@ -187,7 +187,7 @@ def test_broken_mods_reports_classified_folders(app_config, client):
         "name": "ExtractedScript",
         "reason": "unpacked_script",
         "file_count": 1,
-        "zip_names": [],
+        "zip_paths": [],
         "sample_files": ["pkg/main.pyc"],
     }
 
@@ -223,6 +223,35 @@ def test_fix_broken_mod_unsupported_reason_returns_400(app_config, client):
     (folder / "notes.log").write_bytes(b"log")
 
     response = client.post("/api/mods/broken/Leftovers/fix")
+
+    assert response.status_code == 400
+    assert folder.exists()
+
+
+def test_extract_zips_installs_selected_archives(app_config, client):
+    folder = app_config.sims4_mods_dir / "ChooseOne"
+    folder.mkdir()
+    with zipfile.ZipFile(folder / "OptionA.zip", "w") as zf:
+        zf.writestr("a.package", b"a")
+    with zipfile.ZipFile(folder / "OptionB.zip", "w") as zf:
+        zf.writestr("b.package", b"b")
+
+    response = client.post("/api/mods/broken/ChooseOne/extract-zips", json={"zip_paths": ["OptionA.zip"]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["installed"]) == 1
+    assert body["deferred"] == []
+    assert not folder.exists()
+
+
+def test_extract_zips_empty_selection_returns_400(app_config, client):
+    folder = app_config.sims4_mods_dir / "ChooseOne"
+    folder.mkdir()
+    with zipfile.ZipFile(folder / "OptionA.zip", "w") as zf:
+        zf.writestr("a.package", b"a")
+
+    response = client.post("/api/mods/broken/ChooseOne/extract-zips", json={"zip_paths": []})
 
     assert response.status_code == 400
     assert folder.exists()
@@ -270,6 +299,91 @@ def test_delete_broken_folder_unknown_returns_400(client):
     assert response.status_code == 400
 
 
+def test_open_broken_folder_invokes_xdg_open(app_config, client, monkeypatch):
+    (app_config.sims4_mods_dir / "Leftovers").mkdir()
+    calls = []
+    monkeypatch.setattr("backend.main.subprocess.Popen", lambda args: calls.append(args))
+
+    response = client.post("/api/mods/broken/Leftovers/open")
+
+    assert response.status_code == 200
+    assert calls == [["xdg-open", str(app_config.sims4_mods_dir / "Leftovers")]]
+
+
+def test_open_broken_folder_unknown_returns_404(client):
+    response = client.post("/api/mods/broken/DoesNotExist/open")
+
+    assert response.status_code == 404
+
+
+# --- /api/mods/rezipped ("dezip via the app, rezip manually" scenario) ---------------
+
+
+def test_rezipped_mods_empty_when_nothing_rezipped(app_config, conn, client, tmp_path):
+    mod_id = _install_mod(app_config, conn, tmp_path, "RealMod")
+
+    response = client.get("/api/mods/rezipped")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert mod_id  # sanity: install actually happened
+
+
+def test_rezipped_mods_reports_a_mod_manually_rezipped_in_place(app_config, conn, client, tmp_path):
+    mod_id = _install_mod(app_config, conn, tmp_path, "RealMod")
+    library_path = Path(
+        conn.execute("SELECT library_path FROM mods WHERE id = ?", (mod_id,)).fetchone()["library_path"]
+    )
+    for f in library_path.rglob("*"):
+        if f.is_file():
+            f.unlink()
+    with zipfile.ZipFile(library_path / "Rezipped.zip", "w") as zf:
+        zf.writestr("rezipped.package", b"data")
+
+    response = client.get("/api/mods/rezipped")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == [{"mod_id": mod_id, "name": "RealMod", "zip_paths": ["Rezipped.zip"]}]
+
+
+def test_fix_rezip_reinstalls_from_the_zip(app_config, conn, client, tmp_path):
+    mod_id = _install_mod(app_config, conn, tmp_path, "RealMod")
+    library_path = Path(
+        conn.execute("SELECT library_path FROM mods WHERE id = ?", (mod_id,)).fetchone()["library_path"]
+    )
+    for f in library_path.rglob("*"):
+        if f.is_file():
+            f.unlink()
+    with zipfile.ZipFile(library_path / "Rezipped.zip", "w") as zf:
+        zf.writestr("rezipped.package", b"data")
+
+    response = client.post(f"/api/mods/{mod_id}/fix-rezip")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fixed"] is True
+    assert body["mod_id"] == mod_id
+    new_library_path = Path(
+        conn.execute("SELECT library_path FROM mods WHERE id = ?", (mod_id,)).fetchone()["library_path"]
+    )
+    assert (new_library_path / "rezipped.package").is_file()
+
+
+def test_fix_rezip_unknown_mod_returns_400(client):
+    response = client.post("/api/mods/does-not-exist/fix-rezip")
+
+    assert response.status_code == 400
+
+
+def test_fix_rezip_not_actually_rezipped_returns_400(app_config, conn, client, tmp_path):
+    mod_id = _install_mod(app_config, conn, tmp_path, "RealMod")
+
+    response = client.post(f"/api/mods/{mod_id}/fix-rezip")
+
+    assert response.status_code == 400
+
+
 # --- /api/mods/{id} (detail) -----------------------------------------------------
 
 
@@ -277,6 +391,42 @@ def test_get_mod_404_for_unknown_id(client):
     response = client.get("/api/mods/does-not-exist")
 
     assert response.status_code == 404
+
+
+def test_curseforge_name_exposed_in_list_and_detail(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "messy-filename-name", filename="messy.package")
+    conn.execute(
+        "UPDATE mods SET curseforge_id = 123, curseforge_name = 'The Real Mod Name' WHERE id = ?", (mod_id,)
+    )
+    conn.commit()
+
+    listed = next(m for m in client.get("/api/mods").json() if m["id"] == mod_id)
+    detail = client.get(f"/api/mods/{mod_id}").json()
+
+    assert listed["curseforge_name"] == "The Real Mod Name"
+    assert listed["name"] == "messy-filename-name"  # the local name is untouched
+    assert detail["curseforge_name"] == "The Real Mod Name"
+
+
+def test_get_mod_detail_includes_curseforge_url_when_linked(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Linked Mod", filename="linked.package")
+    conn.execute(
+        "UPDATE mods SET curseforge_id = 123, links = ? WHERE id = ?",
+        ('{"curseforge_url": "https://www.curseforge.com/sims4/mods/linked-mod"}', mod_id),
+    )
+    conn.commit()
+
+    body = client.get(f"/api/mods/{mod_id}").json()
+
+    assert body["curseforge_url"] == "https://www.curseforge.com/sims4/mods/linked-mod"
+
+
+def test_get_mod_detail_curseforge_url_is_none_when_unlinked(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Unlinked Mod", filename="unlinked.package")
+
+    body = client.get(f"/api/mods/{mod_id}").json()
+
+    assert body["curseforge_url"] is None
 
 
 def test_get_mod_detail_includes_files_and_resolved_dependency(app_config, conn, tmp_path, client):
@@ -399,6 +549,72 @@ def test_reject_dependency_route_unknown_id_returns_404(client):
     assert response.status_code == 404
 
 
+# --- CurseForge-declared dependencies ---------------------------------------------
+#
+# Route stays thin: the actual matching/idempotency logic is already covered
+# in depth by tests/test_curseforge_dependencies.py — this only proves the
+# route's own wiring (Direct Mode gate, 400/404/502 handling, request shape).
+
+
+def test_detect_curseforge_dependencies_requires_direct_mode(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    conn.execute("UPDATE mods SET curseforge_id = ? WHERE id = ?", (100, mod_id))
+    conn.commit()
+
+    response = client.post(f"/api/mods/{mod_id}/detect-curseforge-dependencies")
+
+    assert response.status_code == 400
+
+
+def test_detect_curseforge_dependencies_unknown_mod_returns_404(app_config, tmp_path, monkeypatch):
+    direct = _direct_client(app_config, tmp_path, monkeypatch, _FakeCurseForgeClient())
+
+    response = direct.post("/api/mods/does-not-exist/detect-curseforge-dependencies")
+
+    assert response.status_code == 404
+
+
+def test_detect_curseforge_dependencies_unlinked_mod_returns_400(app_config, conn, tmp_path, monkeypatch):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")  # curseforge_id stays NULL
+    direct = _direct_client(app_config, tmp_path, monkeypatch, _FakeCurseForgeClient())
+
+    response = direct.post(f"/api/mods/{mod_id}/detect-curseforge-dependencies")
+
+    assert response.status_code == 400
+
+
+def test_detect_curseforge_dependencies_creates_suggested_row(app_config, conn, tmp_path, monkeypatch):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    core_id = _install_mod(app_config, conn, tmp_path, "Core Lib", filename="core.package")
+    conn.execute("UPDATE mods SET curseforge_id = ? WHERE id = ?", (100, mod_id))
+    conn.execute("UPDATE mods SET curseforge_id = ? WHERE id = ?", (200, core_id))
+    conn.commit()
+    fake = _FakeCurseForgeClient(
+        mod_by_id={100: _make_mod(mod_id=100, main_file_id=999)},
+        file_by_key={
+            (100, 999): curseforge.CurseForgeFile(
+                file_id=999,
+                file_name="mod-a.zip",
+                download_url=None,
+                game_version_min=None,
+                game_version_max=None,
+                release_type="release",
+                dependencies=(curseforge.CurseForgeFileDependency(mod_id=200, relation_type=3),),
+            )
+        },
+    )
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post(f"/api/mods/{mod_id}/detect-curseforge-dependencies")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["dependency_type"] == "required"
+    assert body[0]["confidence"] == "suggested"
+    assert body[0]["resolved_name"] == "Core Lib"
+
+
 # --- enable / disable ------------------------------------------------------------
 
 
@@ -448,6 +664,80 @@ def test_delete_removes_mod_from_db_and_library(app_config, conn, tmp_path, clie
     assert not library_path.exists()
 
 
+def test_set_namespace_override_route_updates_the_mod(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Some Mod")
+
+    response = client.post(f"/api/mods/{mod_id}/namespace-override", json={"value": "Corrected"})
+
+    assert response.status_code == 200
+    assert response.json()["namespace_override"] == "Corrected"
+    row = conn.execute("SELECT namespace_override FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["namespace_override"] == "Corrected"
+
+
+def test_set_namespace_override_route_clears_with_null(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Some Mod")
+    client.post(f"/api/mods/{mod_id}/namespace-override", json={"value": "Corrected"})
+
+    response = client.post(f"/api/mods/{mod_id}/namespace-override", json={"value": None})
+
+    assert response.status_code == 200
+    assert response.json()["namespace_override"] is None
+
+
+def test_set_namespace_override_route_unknown_mod_returns_404(client):
+    response = client.post("/api/mods/does-not-exist/namespace-override", json={"value": "X"})
+
+    assert response.status_code == 404
+
+
+def test_get_mods_includes_namespace_override(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Some Mod")
+    client.post(f"/api/mods/{mod_id}/namespace-override", json={"value": "Corrected"})
+
+    body = client.get("/api/mods").json()
+
+    assert body[0]["namespace_override"] == "Corrected"
+
+
+def test_delete_mod_that_was_saved_creates_a_missing_mod_reminder(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Delete Me")
+    client.post("/api/profiles", json={"name": "Weekend Build"})
+    profile_id = client.get("/api/profiles").json()[0]["id"]
+    client.put(f"/api/profiles/{profile_id}/mods", json={"mod_ids": [mod_id]})
+
+    response = client.delete(f"/api/mods/{mod_id}")
+
+    assert response.status_code == 200
+    missing = client.get("/api/mods/missing").json()
+    assert len(missing) == 1
+    assert missing[0]["mod_id"] == mod_id
+    assert missing[0]["name"] == "Delete Me"
+    assert missing[0]["source_profile_names"] == "Weekend Build"
+
+
+def test_delete_mod_not_in_any_saved_state_creates_no_reminder(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Delete Me")
+
+    client.delete(f"/api/mods/{mod_id}")
+
+    assert client.get("/api/mods/missing").json() == []
+
+
+def test_dismiss_missing_mod_removes_it(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Delete Me")
+    client.post("/api/profiles", json={"name": "Weekend Build"})
+    profile_id = client.get("/api/profiles").json()[0]["id"]
+    client.put(f"/api/profiles/{profile_id}/mods", json={"mod_ids": [mod_id]})
+    client.delete(f"/api/mods/{mod_id}")
+    entry_id = client.get("/api/mods/missing").json()[0]["id"]
+
+    response = client.delete(f"/api/mods/missing/{entry_id}")
+
+    assert response.status_code == 200
+    assert client.get("/api/mods/missing").json() == []
+
+
 # --- open-folder -------------------------------------------------------------------
 
 
@@ -486,11 +776,31 @@ class _FakeCurseForgeClient:
     network or needs a real API key (see CLAUDE.md's testing note on
     mode-dependent code)."""
 
-    def __init__(self, search_results=None, files_by_mod=None, mod_by_id=None, *, fail_search=None):
+    def __init__(
+        self,
+        search_results=None,
+        files_by_mod=None,
+        mod_by_id=None,
+        *,
+        fail_search=None,
+        fingerprint_matches=None,
+        mods_by_id=None,
+        fail_fingerprint_matches_with=None,
+        file_by_key=None,
+        get_mod_error_for=None,
+    ):
         self._search_results = search_results or []
         self._files_by_mod = files_by_mod or {}
         self._mod_by_id = mod_by_id or {}
         self._fail_search = fail_search
+        self._fingerprint_matches = fingerprint_matches or {}
+        self._mods_by_id = mods_by_id or {}
+        self._file_by_key = file_by_key or {}  # {(mod_id, file_id): CurseForgeFile} — see get_file()
+        self._get_mod_error_for = get_mod_error_for or {}  # {curseforge_id: Exception} — see get_mod()
+        # Raised once by match_fingerprints(), then cleared — enough to
+        # simulate one transient failure for a retry test without needing a
+        # call counter.
+        self._fail_fingerprint_matches_with = fail_fingerprint_matches_with
         self.download_calls: list[tuple[int, int]] = []
 
     def verify_key(self) -> bool:
@@ -505,13 +815,27 @@ class _FakeCurseForgeClient:
         return self._files_by_mod.get(mod_id, [])
 
     def get_mod(self, mod_id: int):
+        if mod_id in self._get_mod_error_for:
+            raise self._get_mod_error_for[mod_id]
         return self._mod_by_id[mod_id]
+
+    def get_file(self, mod_id: int, file_id: int):
+        return self._file_by_key[(mod_id, file_id)]
 
     def download(self, mod_id: int, file_id: int, destination: Path) -> Path:
         self.download_calls.append((mod_id, file_id))
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"data")
         return destination
+
+    def match_fingerprints(self, fingerprints):
+        if self._fail_fingerprint_matches_with is not None:
+            exc, self._fail_fingerprint_matches_with = self._fail_fingerprint_matches_with, None
+            raise exc
+        return {fp: self._fingerprint_matches[fp] for fp in fingerprints if fp in self._fingerprint_matches}
+
+    def get_mods(self, mod_ids):
+        return [self._mods_by_id[i] for i in mod_ids if i in self._mods_by_id]
 
 
 def _direct_client(app_config, tmp_path, monkeypatch, fake: _FakeCurseForgeClient) -> TestClient:
@@ -856,7 +1180,91 @@ def test_cache_targets_and_clean_roundtrip(app_config, client):
     assert (app_config.sims4_user_dir / "options.ini").exists()
 
 
+def test_open_cache_target_file_opens_its_parent_dir(app_config, client, monkeypatch):
+    (app_config.sims4_user_dir / "localthumbcache.package").write_bytes(b"x")
+    calls = []
+    monkeypatch.setattr("backend.main.subprocess.Popen", lambda args: calls.append(args))
+
+    response = client.post("/api/cache/targets/localthumbcache.package/open")
+
+    assert response.status_code == 200
+    assert calls == [["xdg-open", str(app_config.sims4_user_dir)]]
+
+
+def test_open_cache_target_directory_opens_itself(app_config, client, monkeypatch):
+    (app_config.sims4_user_dir / "cache").mkdir()
+    calls = []
+    monkeypatch.setattr("backend.main.subprocess.Popen", lambda args: calls.append(args))
+
+    response = client.post("/api/cache/targets/cache/open")
+
+    assert response.status_code == 200
+    assert calls == [["xdg-open", str(app_config.sims4_user_dir / "cache")]]
+
+
+def test_open_cache_target_unknown_name_returns_404(client):
+    response = client.post("/api/cache/targets/not-a-real-target/open")
+
+    assert response.status_code == 404
+
+
 # --- /api/settings --------------------------------------------------------------------
+
+
+def test_open_mods_folder_invokes_xdg_open(app_config, client, monkeypatch):
+    calls = []
+    monkeypatch.setattr("backend.main.subprocess.Popen", lambda args: calls.append(args))
+
+    response = client.post("/api/settings/open-mods-folder")
+
+    assert response.status_code == 200
+    assert calls == [["xdg-open", str(app_config.sims4_mods_dir)]]
+
+
+def test_pick_folder_returns_chosen_path(client, monkeypatch, tmp_path):
+    chosen = tmp_path / "Chosen Folder"
+    captured_args = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = f"{chosen}\n"
+
+    def fake_run(args, **kwargs):
+        captured_args.extend(args)
+        return FakeResult()
+
+    monkeypatch.setattr("backend.main.subprocess.run", fake_run)
+
+    response = client.post("/api/settings/pick-folder", json={"initial_dir": str(tmp_path)})
+
+    assert response.status_code == 200
+    assert response.json() == {"path": str(chosen)}
+    assert captured_args[:3] == ["zenity", "--file-selection", "--directory"]
+    assert f"--filename={tmp_path}/" in captured_args
+
+
+def test_pick_folder_returns_none_when_cancelled(client, monkeypatch):
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr("backend.main.subprocess.run", lambda args, **kwargs: FakeResult())
+
+    response = client.post("/api/settings/pick-folder", json={})
+
+    assert response.status_code == 200
+    assert response.json() == {"path": None}
+
+
+def test_pick_folder_unavailable_returns_501(client, monkeypatch):
+    def fake_run(args, **kwargs):
+        raise FileNotFoundError()
+
+    monkeypatch.setattr("backend.main.subprocess.run", fake_run)
+
+    response = client.post("/api/settings/pick-folder", json={})
+
+    assert response.status_code == 501
 
 
 def test_get_settings_returns_configured_paths(app_config, client):
@@ -870,6 +1278,50 @@ def test_get_settings_returns_configured_paths(app_config, client):
     assert body["backup_retention_count"] == app_config.backup_retention_count
     assert body["mods_watcher_enabled"] == app_config.mods_watcher_enabled
     assert body["log_level"] == app_config.log_level
+
+
+def test_update_paths_route_persists_and_returns_new_values(app_config, tmp_path, client):
+    new_library = tmp_path / "new-library"
+
+    response = client.post("/api/settings/paths", json={"library_dir": str(new_library)})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["library_dir"] == str(new_library)
+    assert body["restart_required"] is True
+
+    follow_up = client.get("/api/settings")
+    assert follow_up.json()["library_dir"] == str(new_library)
+
+
+def test_update_paths_route_migrates_installed_mods(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    new_library = tmp_path / "new-library"
+
+    response = client.post("/api/settings/paths", json={"library_dir": str(new_library)})
+
+    assert response.status_code == 200
+    assert (new_library / mod_id / "mymod.package").is_file()
+    row = conn.execute("SELECT library_path FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["library_path"] == str(new_library / mod_id)
+
+
+def test_update_paths_route_rejects_incoherent_combination(app_config, client):
+    bad_library = app_config.sims4_mods_dir / "nested"
+
+    response = client.post("/api/settings/paths", json={"library_dir": str(bad_library)})
+
+    assert response.status_code == 400
+
+
+def test_update_paths_route_warns_on_unrecognizable_game_dir(app_config, tmp_path, client):
+    new_game_dir = tmp_path / "some-other-folder"
+    new_game_dir.mkdir()
+
+    response = client.post("/api/settings/paths", json={"sims4_game_dir": str(new_game_dir)})
+
+    assert response.status_code == 200
+    assert len(response.json()["warnings"]) == 1
 
 
 def test_full_scan_rehashes_and_reports_stats(app_config, conn, tmp_path, client):
@@ -887,11 +1339,361 @@ def test_full_scan_rehashes_and_reports_stats(app_config, conn, tmp_path, client
     assert response.status_code == 200
     body = response.json()
     assert body["mods_scanned"] == 1
+    assert body["mods_imported"] == 0
     assert body["files_hashed"] == 1
     new_hash = conn.execute(
         "SELECT hash FROM mod_files WHERE mod_id = ?", (mod_id,)
     ).fetchone()["hash"]
     assert new_hash != old_hash
+
+
+def test_full_scan_also_imports_untracked_mods(app_config, conn, client):
+    # Regression: a real folder dropped directly under Mods/ (e.g. a
+    # duplicated mod folder from outside the app) used to stay invisible
+    # to "Full scan" — it only ever re-hashed mods already in the DB.
+    unmanaged = app_config.sims4_mods_dir / "duplicated-mod"
+    unmanaged.mkdir(parents=True)
+    (unmanaged / "dup.package").write_bytes(b"data")
+
+    response = client.post("/api/settings/full-scan")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mods_imported"] == 1
+    assert body["mods_scanned"] == 1
+    row = conn.execute("SELECT id FROM mods WHERE id = 'duplicated-mod'").fetchone()
+    assert row is not None
+    assert (app_config.sims4_mods_dir / "duplicated-mod").is_symlink()
+
+
+# --- Loose mods (files dropped directly at Mods/ root) --------------------------------
+
+
+def test_import_loose_files_route_adopts_and_tags_a_loose_package(app_config, conn, client):
+    (app_config.sims4_mods_dir / "SomeMod.package").write_bytes(b"data")
+
+    response = client.post("/api/settings/import-loose-files")
+
+    assert response.status_code == 200
+    assert response.json() == {"mods_imported": 1}
+    row = conn.execute("SELECT is_loose_import FROM mods WHERE name = 'SomeMod'").fetchone()
+    assert row["is_loose_import"] == 1
+
+
+def test_get_mods_reports_is_loose_import_flag(app_config, conn, client):
+    (app_config.sims4_mods_dir / "SomeMod.package").write_bytes(b"data")
+    client.post("/api/settings/import-loose-files")
+
+    body = client.get("/api/mods").json()
+
+    assert body[0]["is_loose_import"] is True
+
+
+def test_match_curseforge_start_requires_direct_mode(client):
+    response = client.post("/api/settings/match-curseforge/start")
+
+    assert response.status_code == 400
+
+
+def test_match_curseforge_step_without_a_session_returns_400(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient()
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post("/api/settings/match-curseforge/step")
+
+    assert response.status_code == 400
+
+
+def test_match_curseforge_start_reports_the_candidate_count(app_config, tmp_path, monkeypatch):
+    (app_config.sims4_mods_dir / "SomeMod.package").write_bytes(b"real content")
+    fake = _FakeCurseForgeClient()
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+    direct.post("/api/settings/import-loose-files")
+
+    response = direct.post("/api/settings/match-curseforge/start")
+
+    assert response.status_code == 200
+    assert response.json() == {"total": 1, "checked": 0, "matched": 0, "skipped_too_large": 0, "done": False}
+
+
+def test_match_curseforge_step_links_a_matched_loose_mod_and_reports_done(app_config, tmp_path, monkeypatch):
+    (app_config.sims4_mods_dir / "SomeMod.package").write_bytes(b"real content")
+    fingerprint = curseforge.curseforge_fingerprint(b"real content")
+    fake = _FakeCurseForgeClient(
+        fingerprint_matches={fingerprint: 111},
+        mods_by_id={111: _make_mod(mod_id=111, author="RealAuthor", thumbnail_url="https://x/y.png")},
+    )
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+    direct.post("/api/settings/import-loose-files")
+    direct.post("/api/settings/match-curseforge/start")
+
+    response = direct.post("/api/settings/match-curseforge/step")
+
+    assert response.status_code == 200
+    assert response.json() == {"total": 1, "checked": 1, "matched": 1, "skipped_too_large": 0, "done": True}
+    mod = direct.get("/api/mods").json()[0]
+    assert mod["curseforge_id"] == 111
+
+    # A step call after the session finished (and was cleared) is the same
+    # "nothing in progress" state as never having started one.
+    after_done = direct.post("/api/settings/match-curseforge/step")
+    assert after_done.status_code == 400
+    assert mod["author"] == "RealAuthor"
+
+
+def test_match_curseforge_step_returns_502_and_preserves_progress_on_transient_failure(
+    app_config, tmp_path, monkeypatch
+):
+    (app_config.sims4_mods_dir / "SomeMod.package").write_bytes(b"real content")
+    fingerprint = curseforge.curseforge_fingerprint(b"real content")
+    fake = _FakeCurseForgeClient(
+        fingerprint_matches={fingerprint: 111},
+        mods_by_id={111: _make_mod(mod_id=111, author="RealAuthor")},
+        fail_fingerprint_matches_with=curseforge.CurseForgeError("rate limited"),
+    )
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+    direct.post("/api/settings/import-loose-files")
+    direct.post("/api/settings/match-curseforge/start")
+
+    failed = direct.post("/api/settings/match-curseforge/step")
+    assert failed.status_code == 502
+    mod = direct.get("/api/mods").json()[0]
+    assert mod["curseforge_id"] is None  # nothing committed from the failed attempt
+
+    # The one-shot failure is cleared now — retrying the exact same call
+    # (session untouched by run_step() on failure) succeeds.
+    retried = direct.post("/api/settings/match-curseforge/step")
+    assert retried.status_code == 200
+    assert retried.json() == {"total": 1, "checked": 1, "matched": 1, "skipped_too_large": 0, "done": True}
+    mod = direct.get("/api/mods").json()[0]
+    assert mod["curseforge_id"] == 111
+
+
+def test_match_curseforge_step_auth_failure_clears_the_session(app_config, tmp_path, monkeypatch):
+    (app_config.sims4_mods_dir / "SomeMod.package").write_bytes(b"real content")
+    fake = _FakeCurseForgeClient(fail_fingerprint_matches_with=curseforge.CurseForgeAuthError("key rejected"))
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+    direct.post("/api/settings/import-loose-files")
+    direct.post("/api/settings/match-curseforge/start")
+
+    response = direct.post("/api/settings/match-curseforge/step")
+
+    assert response.status_code == 401
+    # Not retryable — the session is gone, same "nothing in progress" state
+    # a never-started or already-finished run would be in.
+    after = direct.post("/api/settings/match-curseforge/step")
+    assert after.status_code == 400
+
+
+def test_sync_curseforge_start_requires_direct_mode(client):
+    response = client.post("/api/settings/sync-curseforge/start")
+
+    assert response.status_code == 400
+
+
+def test_sync_curseforge_step_without_a_session_returns_400(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient()
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post("/api/settings/sync-curseforge/step")
+
+    assert response.status_code == 400
+
+
+def test_sync_curseforge_start_reports_linked_mod_count(app_config, conn, tmp_path, monkeypatch):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    conn.execute("UPDATE mods SET curseforge_id = ? WHERE id = ?", (111, mod_id))
+    conn.commit()
+    fake = _FakeCurseForgeClient()
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.post("/api/settings/sync-curseforge/start")
+
+    assert response.status_code == 200
+    assert response.json() == {"total": 1, "checked": 0, "synced": 0, "errors": 0, "done": False}
+
+
+def test_sync_curseforge_step_updates_compat_status_and_reports_done(app_config, conn, tmp_path, monkeypatch):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    conn.execute("UPDATE mods SET curseforge_id = ? WHERE id = ?", (111, mod_id))
+    conn.commit()
+    fake = _FakeCurseForgeClient(
+        mod_by_id={111: _make_mod(mod_id=111, main_file_id=222)},
+        file_by_key={
+            (111, 222): curseforge.CurseForgeFile(
+                file_id=222,
+                file_name="mod-a.zip",
+                download_url=None,
+                game_version_min="1.90",
+                game_version_max="1.100",
+                release_type="release",
+            )
+        },
+    )
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+    direct.post("/api/settings/sync-curseforge/start")
+
+    response = direct.post("/api/settings/sync-curseforge/step")
+
+    assert response.status_code == 200
+    assert response.json() == {"total": 1, "checked": 1, "synced": 1, "errors": 0, "done": True}
+    mod = direct.get(f"/api/mods/{mod_id}").json()
+    # app_config's game_version is None by default — compat_status() can't
+    # classify without it (see test_curseforge_dependencies.py's dedicated
+    # "game_version given" case for the classification itself), but
+    # game_version_min/max (not part of the API response — checked via the
+    # DB directly) are still stored either way.
+    assert mod["compat_status"] == "unknown"
+    row = conn.execute(
+        "SELECT game_version_min, game_version_max FROM mods WHERE id = ?", (mod_id,)
+    ).fetchone()
+    assert row["game_version_min"] == "1.90"
+    assert row["game_version_max"] == "1.100"
+
+
+def test_sync_curseforge_step_auth_failure_clears_the_session(app_config, conn, tmp_path, monkeypatch):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    conn.execute("UPDATE mods SET curseforge_id = ? WHERE id = ?", (111, mod_id))
+    conn.commit()
+    fake = _FakeCurseForgeClient(get_mod_error_for={111: curseforge.CurseForgeAuthError("key rejected")})
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+    direct.post("/api/settings/sync-curseforge/start")
+
+    response = direct.post("/api/settings/sync-curseforge/step")
+
+    assert response.status_code == 401
+    after = direct.post("/api/settings/sync-curseforge/step")
+    assert after.status_code == 400
+
+
+# --- Compat quarantine ---------------------------------------------------------
+
+
+def test_compat_quarantine_preview_reports_incompatible_active_mods(app_config, conn, client, tmp_path):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    conn.execute("UPDATE mods SET compat_status = 'incompatible' WHERE id = ?", (mod_id,))
+    conn.commit()
+
+    response = client.get("/api/compat/quarantine/preview")
+
+    assert response.status_code == 200
+    assert response.json() == [{"mod_id": mod_id, "name": "Mod A", "reason": "incompatible"}]
+
+
+def test_compat_quarantine_route_disables_only_the_confirmed_subset(app_config, conn, client, tmp_path):
+    keep_id = _install_mod(app_config, conn, tmp_path, "Mod Keep")
+    drop_id = _install_mod(app_config, conn, tmp_path, "Mod Drop")
+    conn.execute("UPDATE mods SET compat_status = 'incompatible' WHERE id IN (?, ?)", (keep_id, drop_id))
+    conn.commit()
+
+    # Only confirm drop_id — keep_id must stay active even though it also
+    # showed up in the preview, since the route never trusts more than the
+    # intersection of the request body with a freshly recomputed preview.
+    response = client.post("/api/compat/quarantine", json={"mod_ids": [drop_id]})
+
+    assert response.status_code == 200
+    assert response.json() == {"quarantined": [drop_id]}
+    assert conn.execute("SELECT active FROM mods WHERE id = ?", (drop_id,)).fetchone()["active"] == 0
+    assert conn.execute("SELECT active FROM mods WHERE id = ?", (keep_id,)).fetchone()["active"] == 1
+
+
+def test_compat_quarantine_route_ignores_unrelated_mod_id_in_payload(app_config, conn, client, tmp_path):
+    other_id = _install_mod(app_config, conn, tmp_path, "Unrelated Compatible Mod")
+
+    response = client.post("/api/compat/quarantine", json={"mod_ids": [other_id]})
+
+    assert response.status_code == 200
+    assert response.json() == {"quarantined": []}
+    assert conn.execute("SELECT active FROM mods WHERE id = ?", (other_id,)).fetchone()["active"] == 1
+
+
+def test_compat_quarantine_list_and_release_round_trip(app_config, conn, client, tmp_path):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    conn.execute("UPDATE mods SET compat_status = 'incompatible' WHERE id = ?", (mod_id,))
+    conn.commit()
+    client.post("/api/compat/quarantine", json={"mod_ids": [mod_id]})
+
+    listed = client.get("/api/compat/quarantine")
+    assert listed.status_code == 200
+    assert [row["mod_id"] for row in listed.json()] == [mod_id]
+
+    # Not ready yet — still marked incompatible.
+    release = client.post("/api/compat/quarantine/release")
+    assert release.json() == {"released": [], "still_incompatible": [mod_id], "failed": []}
+
+    conn.execute("UPDATE mods SET compat_status = 'compatible' WHERE id = ?", (mod_id,))
+    conn.commit()
+    release = client.post("/api/compat/quarantine/release")
+    assert release.json() == {"released": [mod_id], "still_incompatible": [], "failed": []}
+    assert conn.execute("SELECT active FROM mods WHERE id = ?", (mod_id,)).fetchone()["active"] == 1
+    assert client.get("/api/compat/quarantine").json() == []
+
+
+def test_compat_quarantine_forget_route_stops_tracking(app_config, conn, client, tmp_path):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Mod A")
+    conn.execute("UPDATE mods SET compat_status = 'incompatible' WHERE id = ?", (mod_id,))
+    conn.commit()
+    client.post("/api/compat/quarantine", json={"mod_ids": [mod_id]})
+
+    response = client.delete(f"/api/compat/quarantine/{mod_id}")
+
+    assert response.status_code == 200
+    assert client.get("/api/compat/quarantine").json() == []
+    # Forgetting is bookkeeping-only — the mod stays disabled either way.
+    assert conn.execute("SELECT active FROM mods WHERE id = ?", (mod_id,)).fetchone()["active"] == 0
+
+
+def test_suggested_groups_route_clusters_related_loose_mods(app_config, conn, client):
+    for suffix in ("ItemA", "ItemB", "ItemC"):
+        (app_config.sims4_mods_dir / f"creator_pack_{suffix}.package").write_bytes(b"data")
+    client.post("/api/settings/import-loose-files")
+
+    response = client.get("/api/mods/loose/suggested-groups")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert len(body[0]["mod_ids"]) == 3
+    assert body[0]["curseforge_id"] is None
+
+
+def test_suggested_groups_route_reports_confirmed_curseforge_groups(app_config, conn, client):
+    for name in ("TotallyUnrelatedNameOne", "CompletelyDifferentNameTwo"):
+        (app_config.sims4_mods_dir / f"{name}.package").write_bytes(b"data")
+    client.post("/api/settings/import-loose-files")
+    conn.execute("UPDATE mods SET curseforge_id = 12345")
+    conn.commit()
+
+    body = client.get("/api/mods/loose/suggested-groups").json()
+
+    assert len(body) == 1
+    assert body[0]["curseforge_id"] == 12345
+    assert len(body[0]["mod_ids"]) == 2
+
+
+def test_merge_loose_mods_route_combines_them(app_config, conn, client):
+    for suffix in ("ItemA", "ItemB"):
+        (app_config.sims4_mods_dir / f"creator_pack_{suffix}.package").write_bytes(b"data")
+    client.post("/api/settings/import-loose-files")
+    mod_ids = [m["mod_ids"] for m in client.get("/api/mods/loose/suggested-groups").json()][0]
+
+    response = client.post("/api/mods/loose/merge", json={"mod_ids": mod_ids, "new_name": "Creator Pack"})
+
+    assert response.status_code == 200
+    new_mod_id = response.json()["mod_id"]
+    assert conn.execute("SELECT name FROM mods WHERE id = ?", (new_mod_id,)).fetchone()["name"] == "Creator Pack"
+    for old_id in mod_ids:
+        assert conn.execute("SELECT 1 FROM mods WHERE id = ?", (old_id,)).fetchone() is None
+
+
+def test_merge_loose_mods_route_rejects_a_single_mod(app_config, conn, client):
+    (app_config.sims4_mods_dir / "SomeMod.package").write_bytes(b"data")
+    client.post("/api/settings/import-loose-files")
+    mod_id = conn.execute("SELECT id FROM mods").fetchone()["id"]
+
+    response = client.post("/api/mods/loose/merge", json={"mod_ids": [mod_id], "new_name": "Solo"})
+
+    assert response.status_code == 400
 
 
 # --- /api/downloads (Assisted Mode detection) -----------------------------------------
@@ -1040,6 +1842,24 @@ def test_schedule_mods_rescan_debounces_then_reruns_incremental_scan(app, app_co
     assert new_hash != old_hash
 
 
+def test_regression_schedule_mods_rescan_also_imports_untracked_mods(app, app_config, conn):
+    # A real folder dropped directly under Mods/ while the app is already
+    # running (e.g. a duplicated mod folder) used to stay invisible until
+    # the next full app restart — the watcher fired, but its debounced
+    # rescan only ever re-hashed mods already in the DB, never adopted new
+    # ones the way the one-time startup scan did.
+    unmanaged = app_config.sims4_mods_dir / "duplicated-mod"
+    unmanaged.mkdir(parents=True)
+    (unmanaged / "dup.package").write_bytes(b"data")
+
+    app.state.schedule_mods_rescan()
+    time.sleep(2.5)  # past the 2s debounce in backend/main.py
+
+    row = conn.execute("SELECT id FROM mods WHERE id = 'duplicated-mod'").fetchone()
+    assert row is not None
+    assert (app_config.sims4_mods_dir / "duplicated-mod").is_symlink()
+
+
 # --- /api/profiles --------------------------------------------------------------------
 
 
@@ -1052,6 +1872,7 @@ def test_create_and_list_profile(client):
     assert len(body) == 1
     assert body[0]["name"] == "Build Only"
     assert body[0]["mod_ids"] == []
+    assert body[0]["created_date"]
 
 
 def test_create_profile_duplicate_name_returns_400(client):
@@ -1079,17 +1900,22 @@ def test_set_profile_mods_unknown_profile_returns_404(client):
 
 
 def test_activate_profile_switches_active_mods(app_config, conn, tmp_path, client):
+    # Additive-only (see profiles.activate_profile()'s docstring): mod_a was
+    # disabled since the save, so loading it re-enables mod_a — mod_b, which
+    # isn't part of this saved state at all, is left untouched rather than
+    # being disabled.
     mod_a = _install_mod(app_config, conn, tmp_path, "Mod A", filename="a.package")
     mod_b = _install_mod(app_config, conn, tmp_path, "Mod B", filename="b.package")
     profile_id = client.post("/api/profiles", json={"name": "A Only"}).json()["id"]
     client.put(f"/api/profiles/{profile_id}/mods", json={"mod_ids": [mod_a]})
+    client.post(f"/api/mods/{mod_a}/disable")
 
     response = client.post(f"/api/profiles/{profile_id}/activate")
 
     assert response.status_code == 200
     mods = {m["id"]: m["active"] for m in client.get("/api/mods").json()}
     assert mods[mod_a] is True
-    assert mods[mod_b] is False
+    assert mods[mod_b] is True
 
 
 def test_activate_profile_unknown_returns_404(client):

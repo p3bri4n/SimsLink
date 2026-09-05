@@ -22,7 +22,7 @@ import webbrowser
 import uvicorn
 from fastapi import FastAPI
 
-from backend.config import Config, ConfigError
+from backend.config import Config, ConfigError, migrate_legacy_data_dir
 from backend.logging_config import configure_logging
 from backend.main import create_app
 
@@ -49,6 +49,7 @@ def main() -> None:
         print(f"SimsLink configuration error: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    migrate_legacy_data_dir()
     configure_logging(config)
     app = create_app(config)
     server = _start_server(app, config.log_level)

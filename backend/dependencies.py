@@ -159,11 +159,17 @@ def unresolved_dependencies(
 
 
 def check_required(mod_id: str, conn: sqlite3.Connection) -> None:
-    """Raises UnresolvedRequiredDependencyError unless every 'required'
-    dependency of mod_id is currently satisfied by an active mod. Optional
-    dependencies never block — callers should warn on those separately via
-    unresolved_dependencies(mod_id, conn, dependency_type="optional")."""
+    """Raises UnresolvedRequiredDependencyError unless every *confirmed*
+    'required' dependency of mod_id is currently satisfied by an active mod.
+    A 'suggested' required dependency (e.g. curseforge_dependencies.py's
+    auto-detected rows) never blocks on its own — same "suggestion is not
+    confirmation" rule as everywhere else in this app; it only starts
+    blocking once the user explicitly confirms it via confirm_dependency().
+    Optional dependencies never block either way — callers should warn on
+    those separately via unresolved_dependencies(mod_id, conn,
+    dependency_type="optional")."""
     missing = unresolved_dependencies(mod_id, conn, dependency_type="required")
+    missing = [link for link in missing if link.confidence == "confirmed"]
     if missing:
         raise UnresolvedRequiredDependencyError(mod_id, missing)
 

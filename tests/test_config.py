@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 import backend.config as config_module
+import backend.db as db_module
 import backend.game_options as game_options_module
 from backend.config import Config, ConfigError, DEFAULT_DOWNLOAD_WATCH_DIR, detect_symlink_support
 
@@ -29,7 +30,6 @@ def clean_env(monkeypatch):
 def write_env_file(tmp_path: Path, **overrides: str) -> Path:
     values = {
         "SIMS4_GAME_DIR": "/games/sims4",
-        "SIMS4_MODS_DIR": "/home/user/Documents/Electronic Arts/The Sims 4/Mods",
         "SIMS4_USER_DIR": "/home/user/Documents/Electronic Arts/The Sims 4",
         "LIBRARY_DIR": "/home/user/simslink-library",
         **overrides,
@@ -47,10 +47,12 @@ def test_from_env_missing_required_raises(tmp_path):
         Config.from_env(env_path)
 
     message = str(exc_info.value)
-    assert "SIMS4_MODS_DIR" in message
     assert "SIMS4_USER_DIR" in message
-    assert "LIBRARY_DIR" in message
     assert "SIMS4_GAME_DIR" not in message
+    # Neither is a real required var anymore — SIMS4_MODS_DIR is derived
+    # from SIMS4_USER_DIR, LIBRARY_DIR defaults to ~/.SimsLink/library.
+    assert "SIMS4_MODS_DIR" not in message
+    assert "LIBRARY_DIR" not in message
 
 
 def test_from_env_loads_required_values(tmp_path):
@@ -62,6 +64,36 @@ def test_from_env_loads_required_values(tmp_path):
     assert config.library_dir == Path("/home/user/simslink-library")
     assert config.curseforge_api_key is None
     assert config.has_api_key is False
+
+
+def test_from_env_sims4_mods_dir_is_derived_from_user_dir(tmp_path):
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.sims4_mods_dir == config.sims4_user_dir / "Mods"
+
+
+def test_from_env_sims4_mods_dir_env_var_is_ignored_if_still_set(tmp_path):
+    # A stale SIMS4_MODS_DIR left over in an old .env from before this was
+    # derived automatically must not silently disagree with SIMS4_USER_DIR.
+    env_path = write_env_file(tmp_path, SIMS4_MODS_DIR="/somewhere/unrelated")
+
+    config = Config.from_env(env_path)
+
+    assert config.sims4_mods_dir == config.sims4_user_dir / "Mods"
+
+
+def test_from_env_library_dir_defaults_to_dot_simslink_when_unset(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "SIMS4_GAME_DIR=/games/sims4\nSIMS4_USER_DIR=/home/user/Documents/Electronic Arts/The Sims 4\n"
+    )
+
+    config = Config.from_env(env_path)
+
+    assert config.library_dir == config_module.DEFAULT_LIBRARY_DIR
+    assert config.library_dir == Path.home() / ".SimsLink" / "library"
 
 
 def test_from_env_game_version_uses_explicit_value_without_detecting(tmp_path, monkeypatch):
@@ -193,6 +225,15 @@ def test_from_env_log_level_rejects_unknown_level(tmp_path):
         Config.from_env(env_path)
 
 
+def test_db_path_and_log_path_live_under_dot_simslink_by_default(tmp_path):
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.db_path == Path.home() / ".SimsLink" / "simslink.sqlite3"
+    assert config.log_path == Path.home() / ".SimsLink" / "simslink.log"
+
+
 def test_log_path_is_next_to_db_path(tmp_path):
     env_path = write_env_file(tmp_path)
 
@@ -252,3 +293,77 @@ def test_detect_symlink_support_false_when_symlink_raises(tmp_path, monkeypatch)
     monkeypatch.setattr(Path, "symlink_to", raise_oserror)
 
     assert detect_symlink_support(tmp_path) is False
+
+
+# --- migrate_legacy_data_dir --------------------------------------------------------
+# Regression coverage for the incident this fixed: DEFAULT_DATA_DIR moved from
+# the XDG data dir to ~/.SimsLink/ without migrating an existing install's
+# real database, so every installed mod silently vanished from the Library
+# (broken-folder detection kept working since it reads Mods/ directly, which
+# is what made the symptom so confusing). LEGACY_DATA_DIR/DEFAULT_DATA_DIR are
+# monkeypatched to tmp_path locations in every test here — this suite must
+# never touch the developer's real ~/.SimsLink or real XDG data dir.
+
+
+def _init_db(path: Path, *, with_mod: bool) -> None:
+    conn = db_module.init_db(path)
+    if with_mod:
+        conn.execute(
+            "INSERT INTO mods (id, name, library_path, primary_type, install_date) VALUES (?, ?, ?, ?, ?)",
+            ("mod1", "Some Mod", "/lib/mod1", "package", "2026-08-22T00:00:00+00:00"),
+        )
+        conn.commit()
+    conn.close()
+
+
+def test_migrate_legacy_data_dir_moves_populated_db(tmp_path, monkeypatch):
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    monkeypatch.setattr(config_module, "LEGACY_DATA_DIR", old_dir)
+    monkeypatch.setattr(config_module, "DEFAULT_DATA_DIR", new_dir)
+    _init_db(old_dir / "simslink.sqlite3", with_mod=True)
+    (old_dir / "simslink.log").write_text("old log")
+
+    config_module.migrate_legacy_data_dir()
+
+    assert (new_dir / "simslink.log").read_text() == "old log"
+    assert not (old_dir / "simslink.sqlite3").exists()
+    assert config_module._sqlite_has_any_mods(new_dir / "simslink.sqlite3") is True
+
+
+def test_migrate_legacy_data_dir_does_nothing_when_old_db_has_no_mods(tmp_path, monkeypatch):
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    monkeypatch.setattr(config_module, "LEGACY_DATA_DIR", old_dir)
+    monkeypatch.setattr(config_module, "DEFAULT_DATA_DIR", new_dir)
+    _init_db(old_dir / "simslink.sqlite3", with_mod=False)
+
+    config_module.migrate_legacy_data_dir()
+
+    assert not new_dir.exists()
+    assert (old_dir / "simslink.sqlite3").exists()
+
+
+def test_migrate_legacy_data_dir_never_overwrites_new_locations_own_data(tmp_path, monkeypatch):
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    monkeypatch.setattr(config_module, "LEGACY_DATA_DIR", old_dir)
+    monkeypatch.setattr(config_module, "DEFAULT_DATA_DIR", new_dir)
+    _init_db(old_dir / "simslink.sqlite3", with_mod=True)
+    _init_db(new_dir / "simslink.sqlite3", with_mod=True)
+
+    config_module.migrate_legacy_data_dir()
+
+    # Both untouched — the new location already had real data of its own.
+    assert (old_dir / "simslink.sqlite3").exists()
+    assert (new_dir / "simslink.sqlite3").exists()
+
+
+def test_migrate_legacy_data_dir_noop_when_no_legacy_db(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "LEGACY_DATA_DIR", tmp_path / "old")
+    monkeypatch.setattr(config_module, "DEFAULT_DATA_DIR", tmp_path / "new")
+
+    config_module.migrate_legacy_data_dir()  # must not raise
+
+    assert not (tmp_path / "new").exists()

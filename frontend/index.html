@@ -6,31 +6,66 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
-<script>
-  // Applied before first paint so switching to light theme (Settings) never
-  // flashes dark on the next load — kept intentionally tiny/inline, no
-  // dependency on app.js having loaded yet.
-  (function () {
-    var theme = localStorage.getItem("simslink-theme");
-    if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
-  })();
-</script>
 </head>
 <body>
 
 <div class="app">
   <div class="topbar">
-    <div class="brand"><span class="gem"></span> SimsLink</div>
+    <div class="brand"><img src="logo.png" alt="" class="brand-logo">SimsLink</div>
     <div class="search-wrap">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="searchInput" data-i18n-placeholder="library.search_placeholder">
+      <button type="button" class="search-clear-btn" id="searchClearBtn" hidden data-i18n-title="library.search_clear_button_title" title="Clear">✕</button>
     </div>
-    <!-- Reflects the real Direct/Assisted state from /api/status — not
-         clickable, unlike the mockup's demo toggle (see CLAUDE.md's mode
-         table: you can't switch into Direct Mode without a valid key). -->
-    <div class="mode-pill" id="modePill">
-      <span class="gem pulse" id="modeGem"></span>
-      <span class="label" id="modeLabel">—</span>
+    <div class="topbar-right">
+      <!-- Crash Mode used to be its own nav page; both actions are now
+           one-click popups reachable from anywhere in the app instead,
+           since neither needs more than a button + a modal to fully work
+           (see openCrashModal()/clickClearCache() in app.js). -->
+      <div class="topbar-actions-wrap">
+        <div class="topbar-actions">
+          <button class="btn" id="headerOpenModsFolderButton">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/></svg>
+            <span data-i18n="header.open_mods_folder_button">Open mods folder</span>
+          </button>
+          <button class="btn" id="headerCrashButton">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span data-i18n="header.crash_button">My game crashed</span>
+          </button>
+          <button class="btn" id="headerClearCacheButton">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            <span data-i18n="header.clear_cache_button">Clear cache</span>
+          </button>
+          <!-- Direct Mode only — hidden/shown by renderStatus(), same
+               toggle the Catalog nav entry already uses. Opens
+               #matchCurseforgeModal (see openMatchCurseforgeModal() in
+               app.js). -->
+          <button class="btn" id="headerMatchCurseforgeButton" hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="m9 11 1.5 1.5L14 9"/></svg>
+            <span data-i18n="header.match_curseforge_button">Try to identify mods</span>
+          </button>
+          <!-- Direct Mode only — hidden/shown by renderStatus(), same
+               toggle as the button above. Opens #syncCurseforgeOverlay (see
+               openSyncCurseforgeModal() in app.js) — refreshes declared
+               dependencies + game-version compat_status for every already-
+               linked mod (curseforge_dependencies.py's bulk sync). -->
+          <button class="btn" id="headerSyncCurseforgeButton" hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span data-i18n="header.sync_curseforge_button">Synchronize</span>
+          </button>
+        </div>
+        <!-- Only for a failure before any popup has opened (e.g. the cache
+             targets fetch itself failing) — errors that happen once a popup
+             is already open use that popup's own banner instead. -->
+        <div class="error-banner header-error-banner" id="headerErrorBanner"></div>
+      </div>
+      <!-- Reflects the real Direct/Assisted state from /api/status — not
+           clickable, unlike the mockup's demo toggle (see CLAUDE.md's mode
+           table: you can't switch into Direct Mode without a valid key). -->
+      <div class="mode-pill" id="modePill">
+        <span class="gem pulse" id="modeGem"></span>
+        <span class="label" id="modeLabel">—</span>
+      </div>
     </div>
   </div>
 
@@ -38,7 +73,6 @@
     <div class="nav-item active" data-view="library"><span data-i18n="nav.library">Library</span></div>
     <div class="nav-item" data-view="catalog"><span data-i18n="nav.catalog">Catalog</span></div>
     <div class="nav-item" data-view="updates"><span data-i18n="nav.updates">Updates</span></div>
-    <div class="nav-item" data-view="crash"><span data-i18n="nav.crash_mode">Crash Mode</span></div>
     <div class="sidebar-divider"></div>
     <div class="nav-item" data-view="settings"><span data-i18n="nav.settings">Settings</span></div>
     <div class="sidebar-foot" id="footVersion">—</div>
@@ -53,16 +87,109 @@
             <div class="sub" id="subtitle"></div>
           </div>
           <div class="head-controls">
-            <label class="simplified-names-toggle" for="simplifiedNamesCheckbox">
-              <input type="checkbox" id="simplifiedNamesCheckbox" checked>
-              <span data-i18n="library.simplified_names_toggle">Simplified names</span>
-            </label>
+            <!-- Filters the grid by mod state: a real 5-position switch (plus
+                 "Tout"/no-filter), always exactly one active — mirrors
+                 modTier()'s own priority order (broken/zip > disabled >
+                 problem > normal), just with modTier()'s merged top tier
+                 split into "Cassés" (a genuinely broken, unpacked_script
+                 folder) vs "Zip" (an unextracted archive OR a rezipped
+                 tracked mod — needs unzipping, not actually broken). See
+                 stateFilterBucket() in app.js. Persisted like the CC/Mix/
+                 Scripts switch, since it's a standing preference once
+                 picked. -->
+            <div class="type-filter-toggle" id="stateFilterToggle">
+              <button class="type-filter-btn" type="button" data-state-filter="broken" data-i18n="library.state_filter.broken">Broken</button>
+              <button class="type-filter-btn" type="button" data-state-filter="zip" data-i18n="library.state_filter.zip">Zip</button>
+              <button class="type-filter-btn" type="button" data-state-filter="duplicate" data-i18n="library.state_filter.duplicate">Duplicates</button>
+              <button class="type-filter-btn" type="button" data-state-filter="normal" data-i18n="library.state_filter.normal">Normal</button>
+              <button class="type-filter-btn" type="button" data-state-filter="disabled" data-i18n="library.state_filter.disabled">Disabled</button>
+              <button class="type-filter-btn" type="button" data-state-filter="" data-i18n="library.state_filter.all">All</button>
+            </div>
+            <div class="head-icon-actions">
+              <button class="icon-label-btn" id="saveStateBtn" data-i18n-title="library.save_state_button_title" title="Save current state">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                <span data-i18n="library.save_state_button_label">Save</span>
+              </button>
+              <div class="state-dropdown-wrap">
+                <button class="icon-label-btn" id="loadStateBtn" data-i18n-title="library.load_state_button_title" title="Load a saved state">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+                  <span data-i18n="library.load_state_button_label">Load</span>
+                </button>
+                <div class="state-dropdown" id="loadStateDropdown" hidden>
+                  <div class="error-banner" id="loadStateErrorBanner"></div>
+                  <div id="loadStateList"></div>
+                </div>
+              </div>
+            </div>
+            <div class="switch-control" id="simplifiedNamesSwitch">
+              <span class="switch-label" data-i18n="library.simplified_names_toggle">Simplified names</span>
+              <div class="switch-buttons">
+                <button class="switch-btn" type="button" data-value="yes" data-i18n-title="common.yes" title="Yes">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="switch-btn" type="button" data-value="no" data-i18n-title="common.no" title="No">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="switch-control" id="groupByAuthorSwitch">
+              <span class="switch-label" data-i18n="library.group_by_author_toggle">Group by author</span>
+              <div class="switch-buttons">
+                <button class="switch-btn" type="button" data-value="yes" data-i18n-title="common.yes" title="Yes">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+                <button class="switch-btn" type="button" data-value="no" data-i18n-title="common.no" title="No">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <!-- Filters the grid by primary_type (mod_manager.py): a real
+                 3-position switch. "Mix" isn't primary_type === 'mixed' —
+                 it's the neutral/no-filter position (shows CC-only,
+                 script-only, and genuinely mixed mods alike); "CC"/"Scripts"
+                 narrow down to that one primary_type only. Persisted like
+                 the view-mode toggle, since it's a standing preference once
+                 picked, not a one-off filter like the loose-import chip
+                 below. -->
+            <!-- Text owned entirely by renderTypeFilterCounts() in app.js
+                 (no data-i18n here) — each label gets a live "(count)" of
+                 how many installed mods that position would show. -->
+            <div class="type-filter-toggle" id="typeFilterToggle">
+              <button class="type-filter-btn" type="button" data-type-filter="package">CC</button>
+              <button class="type-filter-btn" type="button" data-type-filter="">Mix</button>
+              <button class="type-filter-btn" type="button" data-type-filter="script">Scripts</button>
+            </div>
+            <!-- Filters the grid down to mods adopted from a loose file at
+                 Mods/ root (loose_mods.py) — a quick way to find them
+                 amid an otherwise-organized library. Session-only, not
+                 persisted like the switches above (a filter, not a lasting
+                 preference). -->
+            <button class="loose-filter-chip" id="looseOnlyFilterBtn" type="button" hidden></button>
+            <!-- Filters the grid down to TRANSLATION_NAME_RE matches (see
+                 isTranslationByName() in app.js / the "Traduction" badge) —
+                 lets a user confirm which fan translations they actually
+                 have installed. Same session-only, not-persisted rule as
+                 the loose-import chip above. -->
+            <button class="loose-filter-chip" id="translationOnlyFilterBtn" type="button" hidden></button>
+            <!-- Filters the grid down to mods with a real curseforge_id
+                 (Direct Mode catalog install, or the header's CurseForge
+                 fingerprint-match popup) — the same signal as the card's
+                 green/red link-status dot (buildLinkStatusDot() in app.js).
+                 Same session-only, not-persisted rule as the two chips
+                 above. -->
+            <button class="loose-filter-chip" id="linkedOnlyFilterBtn" type="button" hidden></button>
+            <!-- Filters the grid down to mod.compat_status === 'incompatible'
+                 (curseforge.py's compat_status(), checked against the
+                 installed game version) — same signal as the card's
+                 "Incompatible" badge (buildBadges() in app.js). Same
+                 session-only, not-persisted rule as the chips above. -->
+            <button class="loose-filter-chip" id="incompatibleOnlyFilterBtn" type="button" hidden></button>
             <div class="view-toggle" id="viewToggle">
               <button class="view-toggle-btn" data-view-mode="grid" data-i18n-title="library.view_toggle.grid" title="Grid view">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </button>
               <button class="view-toggle-btn" data-view-mode="list" data-i18n-title="library.view_toggle.list" title="List view">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
               </button>
             </div>
           </div>
@@ -75,12 +202,107 @@
              expanded (one line), unlike the conflicts list below. -->
         <div class="warning-banner" id="scriptModsWarning" hidden data-i18n="library.script_mods_warning">Script Mods Allowed is off in the game's options — .ts4script mods won't load.</div>
 
+        <!-- Broken/unzip/duplicate summary banners — same collapsible,
+             session-dismissible pattern as "Fichiers à nettoyer" below, just
+             for the populations that already get their own card/badge
+             treatment in the grid (broken_mods.py's 'unpacked_script'/
+             'unextracted_archive', conflict_detector.py's real-duplicate
+             groups) — a large library can bury those cards, so this gives a
+             count-and-jump summary and, where it's safe to do so
+             unattended, a bulk resolve action. See renderBanner() in app.js. -->
+        <div class="warning-list-banner warning-list-banner--danger" id="brokenModsBanner" hidden>
+          <div class="warning-list-banner-head">
+            <button class="warning-list-toggle" id="brokenModsToggle" type="button"></button>
+            <button class="icon-btn warning-list-dismiss-btn" id="brokenModsDismissBtn" type="button" data-i18n-title="library.broken_banner.dismiss_button_title" title="Dismiss">✕</button>
+          </div>
+          <div class="warning-list-body" id="brokenModsList" hidden></div>
+        </div>
+
+        <div class="warning-list-banner warning-list-banner--purple" id="unzipBanner" hidden>
+          <div class="warning-list-banner-head">
+            <button class="warning-list-toggle" id="unzipToggle" type="button"></button>
+            <!-- Safe to bulk-apply unlike the other bulk actions here — each
+                 individual unzip is already an unambiguous, non-destructive
+                 single-archive extraction (see brokenActionSpec()/
+                 buildRezipActionButton()'s own restraint), only ever
+                 counting entries that qualify for it. -->
+            <button class="btn btn-sm" id="unzipAllButton" type="button" hidden></button>
+            <button class="icon-btn warning-list-dismiss-btn" id="unzipDismissBtn" type="button" data-i18n-title="library.unzip_banner.dismiss_button_title" title="Dismiss">✕</button>
+          </div>
+          <div class="warning-list-body" id="unzipList" hidden></div>
+        </div>
+
+        <div class="warning-list-banner warning-list-banner--warn" id="duplicatesBanner" hidden>
+          <div class="warning-list-banner-head">
+            <button class="warning-list-toggle" id="duplicatesToggle" type="button"></button>
+            <!-- Only ever touches duplicateTagModIds()'s "presumed redundant"
+                 side (an author/name-suffix signal already exists) — a
+                 group with no such signal (both sides equally unknown) is
+                 never auto-picked, same "suspicion is not confirmation"
+                 rule as everywhere else; disabled with 0 to resolve. -->
+            <button class="btn btn-sm" id="resolveDuplicatesBulkButton" type="button"></button>
+            <button class="icon-btn warning-list-dismiss-btn" id="duplicatesDismissBtn" type="button" data-i18n-title="library.duplicates_banner.dismiss_button_title" title="Dismiss">✕</button>
+          </div>
+          <div class="warning-list-body" id="duplicatesList" hidden></div>
+        </div>
+
+        <!-- compat_quarantine.py: active mods flagged incompatible with the
+             current game version, plus any active mod that locally
+             required-depends on one (best-effort cascade — see that
+             module's docstring on why it can't be exhaustive). Unlike the
+             other bulk actions above, the button here never disables
+             anything by itself — it always opens a checkbox-per-mod confirm
+             step first (confirmQuarantineMods()), since the cascade isn't
+             guaranteed complete. See renderCompatQuarantineBanner(). -->
+        <div class="warning-list-banner warning-list-banner--warn" id="compatQuarantineBanner" hidden>
+          <div class="warning-list-banner-head">
+            <button class="warning-list-toggle" id="compatQuarantineToggle" type="button"></button>
+            <button class="btn btn-sm" id="openQuarantineConfirmButton" type="button"></button>
+            <button class="icon-btn warning-list-dismiss-btn" id="compatQuarantineDismissBtn" type="button" data-i18n-title="library.compat_quarantine_banner.dismiss_button_title" title="Dismiss">✕</button>
+          </div>
+          <div class="warning-list-body" id="compatQuarantinePreviewList" hidden></div>
+        </div>
+
+        <!-- loose_mods.suggest_groupings() — loose-imported mods (see
+             "Loose mods" in Settings) that look like they belong together,
+             either a confirmed shared curseforge_id (a real, matched
+             identity — green "Confirmed on CurseForge" pill) or just a
+             shared name prefix (a weaker guess). No bulk action here: unlike
+             duplicatesBanner's "resolve unambiguous", there's no safe
+             unattended default for "which loose files should become one
+             mod" — every group goes through the comparison panel
+             (#mergeComparePanel below) for a manual, but well-informed,
+             decision. See renderMergeableBanner()/openMergeComparison(). -->
+        <div class="warning-list-banner warning-list-banner--purple" id="mergeableBanner" hidden>
+          <div class="warning-list-banner-head">
+            <button class="warning-list-toggle" id="mergeableToggle" type="button"></button>
+            <button class="icon-btn warning-list-dismiss-btn" id="mergeableDismissBtn" type="button" data-i18n-title="library.mergeable_banner.dismiss_button_title" title="Dismiss">✕</button>
+          </div>
+          <div class="warning-list-body" id="mergeableList" hidden></div>
+        </div>
+
         <!-- Informational only — never blocks anything. Combines
              conflict_detector.py's file-level conflicts and blacklist.py's
              pattern matches; hidden entirely when both come back empty. -->
         <div class="conflicts-banner" id="conflictsBanner" hidden>
-          <button class="conflicts-toggle" id="conflictsToggle" type="button"></button>
+          <div class="conflicts-banner-head">
+            <button class="conflicts-toggle" id="conflictsToggle" type="button"></button>
+            <!-- Session-only: hides the whole banner until the next launch,
+                 without touching any of the underlying broken folders/files
+                 — see renderWarnings()'s state.conflictsBannerDismissed. -->
+            <button class="icon-btn conflicts-dismiss-btn" id="conflictsDismissBtn" type="button" data-i18n-title="library.conflicts.dismiss_banner_button_title" title="Dismiss">✕</button>
+          </div>
           <div class="conflicts-list" id="conflictsList" hidden></div>
+        </div>
+
+        <!-- A mod deleted while it was still part of a saved state
+             (profiles.record_missing_mod_if_saved()) — a reminder, not a
+             problem, so a separate purple banner rather than folded into
+             the orange conflicts one above: dismissing a row here just
+             clears the reminder, it doesn't fix or delete anything. -->
+        <div class="missing-mods-banner" id="missingModsBanner" hidden>
+          <button class="missing-mods-toggle" id="missingModsToggle" type="button"></button>
+          <div class="missing-mods-list" id="missingModsList" hidden></div>
         </div>
       </div>
 
@@ -141,25 +363,6 @@
       <div id="updatesResults" class="catalog-list" hidden></div>
     </section>
 
-    <section id="view-crash" class="view" hidden>
-      <div class="sticky-head">
-        <div class="main-head">
-          <div>
-            <h1 data-i18n="crash.title">Crash Mode</h1>
-            <div class="sub" data-i18n="crash.subtitle">Diagnose the last crash and clean up stale cache.</div>
-          </div>
-          <div class="actions">
-            <button class="btn" id="crashClearCacheButton" data-i18n="crash.clear_cache_button">Clear cache</button>
-            <button class="btn primary" id="crashAnalyzeButton" data-i18n="crash.analyze_button">I crashed</button>
-          </div>
-        </div>
-
-        <div class="error-banner" id="crashErrorBanner"></div>
-      </div>
-
-      <div id="crashStatus"></div>
-    </section>
-
     <section id="view-settings" class="view" hidden>
       <div class="sticky-head">
         <div class="main-head">
@@ -169,6 +372,45 @@
 
       <div class="detail-section">
         <h4 data-i18n="settings.folders_heading">Folders</h4>
+
+        <!-- Each browse button opens a native OS folder picker (zenity, via
+             POST /api/settings/pick-folder — a web page can't resolve a
+             chosen folder to a real absolute path on its own) and fills the
+             input next to it; typing the path directly still works too. -->
+        <div class="settings-path-field">
+          <label data-i18n="settings.folder.game_dir">Game folder</label>
+          <div class="settings-path-input-row">
+            <input type="text" id="settingsGameDirInput" class="text-input">
+            <button type="button" class="btn" id="browseGameDirBtn" data-i18n-title="settings.browse_folder_button_title" title="Browse…">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="settings-path-field">
+          <label data-i18n="settings.folder.user_dir">Game user folder</label>
+          <div class="settings-path-input-row">
+            <input type="text" id="settingsUserDirInput" class="text-input">
+            <button type="button" class="btn" id="browseUserDirBtn" data-i18n-title="settings.browse_folder_button_title" title="Browse…">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="settings-path-field">
+          <label data-i18n="settings.folder.library_dir">Library folder</label>
+          <div class="settings-path-input-row">
+            <input type="text" id="settingsLibraryDirInput" class="text-input">
+            <button type="button" class="btn" id="browseLibraryDirBtn" data-i18n-title="settings.browse_folder_button_title" title="Browse…">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/></svg>
+            </button>
+          </div>
+        </div>
+        <p class="sub" data-i18n="settings.paths_notice">Changing the library or game user folder automatically moves your installed mods to the new location. A restart is needed afterward for the change to fully take effect (the real-time folder watcher keeps watching the old location until then).</p>
+        <div class="error-banner" id="settingsPathsErrorBanner"></div>
+        <div id="settingsPathsWarnings" class="warning-banner" hidden></div>
+        <div id="settingsPathsSavedNotice" class="empty-inline" hidden data-i18n="settings.paths_saved_notice">Paths updated — restart SimsLink for the change to fully take effect.</div>
+        <button class="btn" id="savePathsButton" data-i18n="settings.save_paths_button">Save paths</button>
+
+        <!-- Read-only, derived values — not independently settable. -->
         <div id="settingsFolders"></div>
       </div>
 
@@ -187,22 +429,6 @@
       </div>
 
       <div class="detail-section">
-        <h4 data-i18n="settings.theme_heading">Theme</h4>
-        <select id="themeSelect">
-          <option value="dark" data-i18n="settings.theme.dark">Dark</option>
-          <option value="light" data-i18n="settings.theme.light">Light</option>
-        </select>
-      </div>
-
-      <div class="detail-section">
-        <h4 data-i18n="settings.tile_size_heading">Library tile size</h4>
-        <select id="tileSizeSelect">
-          <option value="large" data-i18n="settings.tile_size.large">Large</option>
-          <option value="compact" data-i18n="settings.tile_size.compact">Compact</option>
-        </select>
-      </div>
-
-      <div class="detail-section">
         <h4 data-i18n="settings.game_heading">Game</h4>
         <div id="settingsScriptMods" class="settings-row"></div>
       </div>
@@ -217,21 +443,55 @@
         <button class="btn" id="fullScanButton" data-i18n="settings.full_scan_button">Full scan</button>
       </div>
 
+      <!-- loose_mods.py: adopts .package/.ts4script files sitting directly
+           at Mods/ root (a very common state — the official install method
+           for Sims 4 mods needs no folder at all) into individually-tracked
+           mods. Manual-only, same reasoning as Full scan above. The
+           confirmable "tidy up related ones" follow-up (suggest_groupings())
+           lives on the Library page now, in the "Mods fusionnables" banner —
+           see #mergeableBanner — not here, so it's visible wherever the
+           Library is instead of buried in Settings. -->
+      <div class="detail-section">
+        <h4 data-i18n="settings.loose_mods_heading">Loose mods</h4>
+        <p class="sub" data-i18n="settings.loose_mods_notice">Adopts .package/.ts4script files sitting directly at the root of Mods/ (no folder of their own) as individually-tracked mods, tagged "Loose" so they're easy to find afterward.</p>
+        <div class="error-banner" id="settingsLooseErrorBanner"></div>
+        <div id="settingsLooseImportResult" class="empty-inline"></div>
+        <button class="btn" id="importLooseFilesButton" data-i18n="settings.import_loose_files_button">Import loose files</button>
+      </div>
+
+      <!-- Bulk-clears mods.namespace_override (see the edit icon on an
+           author-group header in the Library) — frontend-only, loops the
+           same POST /api/mods/{id}/namespace-override route the header
+           editor already uses, with value: null for every mod that
+           currently has one set. -->
+      <div class="detail-section">
+        <h4 data-i18n="settings.namespaces_heading">Custom groupings</h4>
+        <p class="sub" data-i18n="settings.namespaces_notice">Clears every manually corrected Library grouping label (the edit icon on an author-group header) — affected mods revert to normal author/prefix inference. Doesn't touch any mod's real "author" field.</p>
+        <div class="error-banner" id="settingsNamespacesErrorBanner"></div>
+        <div id="settingsNamespacesResult" class="empty-inline"></div>
+        <button class="btn danger" id="clearNamespaceOverridesButton" data-i18n="settings.clear_namespace_overrides_button">Clear custom groupings</button>
+      </div>
+
+      <!-- compat_quarantine.py: mods paused via the Library's "Mods
+           incompatibles" banner above (either directly flagged incompatible,
+           or pulled in because they locally required-depend on one) — this
+           section is purely for managing what's already paused; the
+           pause/preview action itself lives on the Library page. Reactivate
+           becomes possible once a CurseForge resync (Library header's
+           "Synchroniser" button) shows a mod's compat_status cleared. -->
+      <div class="detail-section">
+        <h4 data-i18n="settings.compat_quarantine_heading">Compatibility quarantine</h4>
+        <p class="sub" data-i18n="settings.compat_quarantine_notice">Mods paused by the Library's "Incompatible mods" banner. Reactivate here once an update (checked via "Synchronize") fixes them — a mod still marked incompatible is left alone.</p>
+        <div class="error-banner" id="settingsCompatQuarantineErrorBanner"></div>
+        <div id="settingsCompatQuarantineResult" class="empty-inline"></div>
+        <div id="compatQuarantineManageList"></div>
+        <button class="btn" id="releaseCompatQuarantineButton" data-i18n="settings.release_compat_quarantine_button">Reactivate ready mods</button>
+      </div>
+
       <div class="detail-section">
         <h4 data-i18n="settings.logging_heading">Logging</h4>
         <div id="settingsLogging"></div>
         <p class="sub" data-i18n="settings.logging_notice">Set via LOG_LEVEL in .env (DEBUG/INFO/WARNING/ERROR/CRITICAL) — controls both the log file above and console output.</p>
-      </div>
-
-      <div class="detail-section">
-        <h4 data-i18n="settings.profiles_heading">Profiles</h4>
-        <p class="sub" data-i18n="settings.profiles_notice">A profile saves which mods are active right now, under a name — activating it later enables exactly that set again and disables everything else.</p>
-        <div class="error-banner" id="profilesErrorBanner"></div>
-        <div id="profilesList"></div>
-        <div class="search-row">
-          <input type="text" class="text-input" id="newProfileNameInput" data-i18n-placeholder="settings.profile_name_placeholder" style="flex:1">
-          <button class="btn primary" id="createProfileButton" data-i18n="settings.create_profile_button">Save current as profile</button>
-        </div>
       </div>
 
       <div class="detail-section">
@@ -248,42 +508,133 @@
   </div>
 </div>
 
-<div class="overlay" id="overlay" onclick="closeDetail()"></div>
+<!-- Shared backdrop for both the single #detail panel and the multi-panel
+     duplicate comparison below — closeAnyDetail() closes whichever is
+     actually open. -->
+<div class="overlay" id="overlay" onclick="closeAnyDetail()"></div>
 <div class="detail" id="detail">
   <div class="detail-hero">
     <div class="detail-close" onclick="closeDetail()">✕</div>
   </div>
-  <div class="detail-body">
-    <h2 id="dName">—</h2>
-    <div class="detail-author" id="dAuthor">—</div>
-    <div class="detail-badges">
-      <span class="pill" id="dStatus"></span>
-      <span class="pill" id="dVersion">—</span>
-      <span class="pill" id="dType">—</span>
-    </div>
-    <div class="detail-desc" id="dDesc">—</div>
+  <!-- Only this scrolls (description/dependencies can genuinely be long) —
+       .detail-actions below sits outside it, pinned to the bottom of the
+       panel's flex column, so it's always reachable with no scrolling. -->
+  <div class="detail-scroll">
+    <div class="detail-body">
+      <h2 id="dName">—</h2>
+      <div class="detail-author" id="dAuthor">—</div>
+      <div class="detail-badges">
+        <span class="pill" id="dVersion">—</span>
+        <span class="pill" id="dType">—</span>
+      </div>
+      <!-- Only shown when the mod is linked to a real CurseForge entry
+           (curseforge_url, set alongside curseforge_id — see
+           GET /api/mods/{id}). renderDetail() toggles hidden/onclick. -->
+      <button class="pill detail-curseforge-link" id="dCurseforgeLink" type="button" hidden>
+        <span data-i18n="library.detail.view_on_curseforge">View on CurseForge</span>
+      </button>
+      <div class="detail-desc" id="dDesc">—</div>
 
-    <div class="detail-section" id="dConflictsSection" hidden>
-      <h4 data-i18n="library.detail.conflicts_heading">Conflicts &amp; warnings</h4>
-      <div id="dConflicts"></div>
-    </div>
+      <div class="detail-section" id="dConflictsSection" hidden>
+        <h4 data-i18n="library.detail.conflicts_heading">Conflicts &amp; warnings</h4>
+        <div id="dConflicts"></div>
+      </div>
 
-    <div class="detail-section">
-      <h4 data-i18n="library.detail.dependencies_heading">Dependencies</h4>
-      <div id="dDependencies"></div>
-      <button class="btn btn-sm" id="detectTranslationBtn" data-i18n="library.detail.detect_translation_button">Check for translation match</button>
-      <div id="dTranslationSuggestions" class="translation-suggestions"></div>
-    </div>
+      <div class="detail-section" id="dDependenciesSection">
+        <h4 data-i18n="library.detail.dependencies_heading">Dependencies</h4>
+        <!-- Visual overview above the real list below (renderDependencyGraph()
+             in app.js) — clicking a node scrolls to/highlights its .dep-row
+             rather than duplicating Confirm/Reject inside the SVG. Hidden
+             when the mod has no dependencies at all. -->
+        <div id="dDependencyGraph" class="dep-graph" hidden></div>
+        <div id="dDependencies"></div>
+        <button class="btn btn-sm" id="detectTranslationBtn" data-i18n="library.detail.detect_translation_button">Check for translation match</button>
+        <div id="dTranslationSuggestions" class="translation-suggestions"></div>
+        <!-- Only for a linked mod (mod.curseforge_id) in Direct Mode — see
+             curseforge_dependencies.py. Writes 'suggested' rows directly
+             (no separate pick-a-candidate step, unlike translation
+             detection above — a CurseForge-declared dependency names an
+             exact modId, nothing ambiguous to choose between). -->
+        <button class="btn btn-sm" id="detectCurseforgeDependenciesBtn" data-i18n="library.detail.detect_curseforge_dependencies_button" hidden></button>
+      </div>
 
-    <div class="detail-section">
-      <h4 data-i18n="library.detail.files_heading">Installed files</h4>
-      <div id="dFiles"></div>
+      <div class="detail-section">
+        <h4 data-i18n="library.detail.files_heading">Installed files</h4>
+        <!-- Its own bounded scrollbox — a mod can have thousands of files,
+             which would otherwise dominate the panel's whole scroll height. -->
+        <div id="dFiles" class="detail-files-scroll"></div>
+      </div>
     </div>
+  </div>
 
-    <div class="detail-actions">
-      <button class="btn" id="openFolderBtn" data-i18n="library.detail.open_folder_button">Open folder</button>
-      <button class="btn danger" id="deleteBtn" data-i18n="library.detail.delete_button">Delete</button>
-    </div>
+  <!-- Icon-only, same visual language as a card's own action icons
+       (buildDeleteIconButton()/the active .toggle switch/repair icons) —
+       harmonizes the detail panel with the card/row preview instead of the
+       old full-width text buttons. Always visible: outside .detail-scroll,
+       not part of what scrolls. -->
+  <div class="detail-actions" id="dActions">
+    <button class="icon-btn detail-icon-btn" id="openFolderBtn" data-i18n-title="library.detail.open_folder_button" title="Open folder">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/></svg>
+    </button>
+    <button class="icon-btn detail-icon-btn" id="toggleActiveBtn" title="Disable">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+    </button>
+    <!-- For a broken-folder pseudo-mod (renderBrokenDetail() in app.js, no
+         folder to open and no enable/disable concept), #openFolderBtn/
+         #toggleActiveBtn above are hidden and this holds the reason-specific
+         repair icon instead — hidden rather than reused/removed so a later
+         real-mod detail view can just unhide them again. For a real,
+         rezipped mod (renderDetail()), the two buttons above stay visible
+         and this just adds a one-click re-extract icon alongside them. -->
+    <div id="dBrokenActions" class="detail-actions-broken" hidden></div>
+    <button class="icon-btn detail-icon-btn danger" id="deleteBtn" data-i18n-title="library.detail.delete_button" title="Delete">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Duplicate comparison — a single vertical-list panel (same slide-in
+     shell as #detail below), one compact card per mod in a real duplicate
+     group (exact_duplicate_mod/folder_duplication). Replaces the old
+     side-by-side full-detail-panel-per-mod layout: that needed a custom
+     horizontal-scroll fix that broke repeatedly with a large group (see
+     CLAUDE.md) and buried the folder name — the one fact that actually
+     helps tell a copy apart, since duplicates otherwise share identical
+     content/description/dependencies — under a wall of redundant per-mod
+     detail. A vertical list scrolls natively regardless of group size, and
+     puts the folder name front and center (buildDuplicateCompareCard() in
+     app.js). Shares #overlay above as its backdrop. -->
+<div class="detail compare-panel" id="dupComparePanel">
+  <div class="compare-panel-head">
+    <h3 data-i18n="library.dup_compare.title">Duplicates found</h3>
+    <button class="modal-close-btn" onclick="closeDuplicateComparison()">✕</button>
+  </div>
+  <p class="compare-panel-instructions" data-i18n="library.dup_compare.instructions">Click the one to keep — the others will be deleted.</p>
+  <div class="detail-scroll"><div class="compare-card-list" id="dupCompareList"></div></div>
+</div>
+
+<!-- Merge comparison — the manual resolution tool for
+     loose_mods.suggest_groupings() (see #mergeableBanner above). Same
+     single vertical-panel shell as the duplicate comparison above — but its
+     list is checkbox-select (any subset, not "pick one") and it carries a
+     name field + confirm button pinned to the bottom (.detail-actions,
+     same "always reachable, never covered" pattern the single #detail panel
+     already uses for its own action row) instead of resolving on a card
+     click. Shares #overlay above as its backdrop. -->
+<div class="detail compare-panel" id="mergeComparePanel">
+  <div class="compare-panel-head">
+    <h3 data-i18n="library.merge_compare.title">Mergeable mods</h3>
+    <button class="modal-close-btn" onclick="closeMergeComparison()">✕</button>
+  </div>
+  <!-- Reliability (loose_mods.suggest_groupings()'s curseforge_id: a
+       confirmed shared identity vs. just a name-prefix guess) is a property
+       of the whole suggested group, not of any one member, so this shows
+       once here instead of being repeated on every card below. -->
+  <div class="compare-panel-banner" id="mergeCompareReliability"></div>
+  <div class="detail-scroll"><div class="compare-card-list" id="mergeCompareList"></div></div>
+  <div class="detail-actions" id="mergeCompareActions">
+    <input type="text" class="text-input" id="mergeCompareNameInput">
+    <button type="button" class="btn primary" id="mergeCompareConfirmBtn"></button>
   </div>
 </div>
 
@@ -311,6 +662,68 @@
       <button class="btn" id="downloadDismissBtn">—</button>
       <button class="btn" id="downloadReplaceBtn" hidden>—</button>
       <button class="btn primary" id="downloadInstallBtn">—</button>
+    </div>
+  </div>
+</div>
+
+<!-- Crash diagnosis popup — replaces the former Crash Mode nav page.
+     Triggered by the "My game crashed" header button (openCrashModal() in
+     app.js), which kicks off the analysis immediately on open. #crashStatus/
+     #crashErrorBanner keep the ids/logic the old page already had; only the
+     surrounding chrome changed. -->
+<div class="confirm-overlay" id="crashOverlay">
+  <div class="confirm-modal confirm-modal--wide">
+    <div class="confirm-modal-head">
+      <h3 data-i18n="crash.modal_title">Crash diagnosis</h3>
+      <button type="button" class="modal-close-btn" id="crashCloseBtn">✕</button>
+    </div>
+    <div class="error-banner" id="crashErrorBanner"></div>
+    <div id="crashStatus"></div>
+  </div>
+</div>
+
+<!-- CurseForge fingerprint-match popup — triggered by the header's "Try to
+     identify mods" button (Direct Mode only, openMatchCurseforgeModal() in
+     app.js), which starts the chunked run immediately on open. The single
+     bottom button doubles as Stop (while running) and Close (once done or
+     stopped) rather than two separate buttons — see setMatchCurseforgeButtonMode(). -->
+<div class="confirm-overlay" id="matchCurseforgeOverlay">
+  <div class="confirm-modal confirm-modal--wide">
+    <div class="confirm-modal-head">
+      <h3 data-i18n="header.match_curseforge_button">Try to identify mods</h3>
+      <button type="button" class="modal-close-btn" id="matchCurseforgeCloseBtn">✕</button>
+    </div>
+    <div class="error-banner" id="matchCurseforgeErrorBanner"></div>
+    <p class="sub" id="matchCurseforgeStatusText">—</p>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="matchCurseforgeProgressFill"></div>
+    </div>
+    <div class="confirm-actions">
+      <button class="btn" id="matchCurseforgeStopBtn">—</button>
+    </div>
+  </div>
+</div>
+
+<!-- CurseForge sync popup — triggered by the header's "Synchronize" button
+     (Direct Mode only, openSyncCurseforgeModal() in app.js), which starts
+     the chunked run immediately on open. Same shell/behavior as
+     #matchCurseforgeOverlay above (single bottom button doubles as
+     Stop/Close — see setSyncCurseforgeButtonMode()), refreshing every
+     already-linked mod's declared dependencies + compat_status instead of
+     linking new ones. -->
+<div class="confirm-overlay" id="syncCurseforgeOverlay">
+  <div class="confirm-modal confirm-modal--wide">
+    <div class="confirm-modal-head">
+      <h3 data-i18n="header.sync_curseforge_button">Synchronize</h3>
+      <button type="button" class="modal-close-btn" id="syncCurseforgeCloseBtn">✕</button>
+    </div>
+    <div class="error-banner" id="syncCurseforgeErrorBanner"></div>
+    <p class="sub" id="syncCurseforgeStatusText">—</p>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="syncCurseforgeProgressFill"></div>
+    </div>
+    <div class="confirm-actions">
+      <button class="btn" id="syncCurseforgeStopBtn">—</button>
     </div>
   </div>
 </div>

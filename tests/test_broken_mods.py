@@ -1,11 +1,13 @@
 import dataclasses
 import zipfile
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
 from backend import backups as backups_module
 from backend import broken_mods
+from backend import mod_manager
 
 
 class _FakeClock:
@@ -43,8 +45,23 @@ def test_loose_zip_is_reported_unextracted_archive(app_config, conn):
     results = broken_mods.scan_broken_mods(app_config, conn)
 
     assert _names_and_reasons(results) == {"SomeMod": "unextracted_archive"}
-    assert results[0].zip_names == ["SomeMod.zip"]
+    assert results[0].zip_paths == ["SomeMod.zip"]
     assert results[0].file_count == 2
+
+
+def test_nested_zip_is_reported_with_relative_path(app_config, conn):
+    # A zip doesn't have to sit at the folder's root — _classify() scans
+    # recursively, and the extraction logic needs the full relative path
+    # to find it again, not just its bare filename (a bare name silently
+    # resolved to the wrong location for anything not at the root).
+    folder = app_config.sims4_mods_dir / "SomeMod"
+    nested = folder / "Optional"
+    nested.mkdir(parents=True)
+    (nested / "Variant.zip").write_bytes(b"pk-fake-zip-bytes")
+
+    results = broken_mods.scan_broken_mods(app_config, conn)
+
+    assert results[0].zip_paths == ["Optional/Variant.zip"]
 
 
 def test_loose_pyc_files_are_reported_unpacked_script(app_config, conn):
@@ -360,3 +377,232 @@ def test_delete_broken_folder_works_for_any_reason(app_config):
 def test_delete_broken_folder_unknown_folder_raises(app_config):
     with pytest.raises(broken_mods.BrokenModFixError):
         broken_mods.delete_broken_folder("DoesNotExist", app_config)
+
+
+# --- extract_selected_zips (multi-archive choice) ----------------------------
+
+
+def test_extract_selected_zips_installs_one_of_several(app_config, conn):
+    folder = app_config.sims4_mods_dir / "ChooseOne"
+    folder.mkdir()
+    with zipfile.ZipFile(folder / "OptionA.zip", "w") as zf:
+        zf.writestr("a.package", b"a")
+    with zipfile.ZipFile(folder / "OptionB.zip", "w") as zf:
+        zf.writestr("b.package", b"b")
+
+    result = broken_mods.extract_selected_zips("ChooseOne", app_config, conn, ["OptionA.zip"])
+
+    assert len(result["installed"]) == 1
+    assert result["deferred"] == []
+    assert not folder.exists()
+    row = conn.execute("SELECT active FROM mods WHERE id = ?", (result["installed"][0],)).fetchone()
+    assert row["active"] == 1
+    # OptionB.zip was never selected — still recoverable from the backup,
+    # not silently lost.
+    backups = list((app_config.library_dir / ".backups").glob("ChooseOne-*"))
+    assert (backups[0] / "OptionB.zip").is_file()
+
+
+def test_extract_selected_zips_installs_several_as_separate_mods(app_config, conn):
+    folder = app_config.sims4_mods_dir / "NeedsBoth"
+    folder.mkdir()
+    with zipfile.ZipFile(folder / "Main.zip", "w") as zf:
+        zf.writestr("main.package", b"main")
+    with zipfile.ZipFile(folder / "Fix.zip", "w") as zf:
+        zf.writestr("fix.package", b"fix")
+
+    result = broken_mods.extract_selected_zips("NeedsBoth", app_config, conn, ["Main.zip", "Fix.zip"])
+
+    assert len(result["installed"]) == 2
+    names = {
+        conn.execute("SELECT name FROM mods WHERE id = ?", (mid,)).fetchone()["name"] for mid in result["installed"]
+    }
+    assert names == {"NeedsBoth - Main", "NeedsBoth - Fix"}
+
+
+def test_extract_selected_zips_finds_nested_archive_by_relative_path(app_config, conn):
+    folder = app_config.sims4_mods_dir / "SomeMod"
+    nested = folder / "Optional"
+    nested.mkdir(parents=True)
+    with zipfile.ZipFile(nested / "Variant.zip", "w") as zf:
+        zf.writestr("variant.package", b"data")
+
+    result = broken_mods.extract_selected_zips("SomeMod", app_config, conn, ["Optional/Variant.zip"])
+
+    assert len(result["installed"]) == 1
+
+
+def test_extract_selected_zips_defers_a_zip_of_zips(app_config, conn):
+    # A selected archive that contains only further archives (no directly
+    # loadable content of its own) can't be installed as a mod outright —
+    # it's extracted into a fresh Mods/ folder instead, so the next scan
+    # reports it as a new 'unextracted_archive' entry to choose from again.
+    folder = app_config.sims4_mods_dir / "OuterZip"
+    folder.mkdir()
+    outer = folder / "Outer.zip"
+    with zipfile.ZipFile(outer, "w") as zf:
+        # Write inner .zip *bytes* as an entry — a real nested archive.
+        inner_bytes_path = app_config.sims4_mods_dir / "_inner.zip"
+        with zipfile.ZipFile(inner_bytes_path, "w") as inner:
+            inner.writestr("real.package", b"data")
+        zf.write(inner_bytes_path, "Inner.zip")
+        inner_bytes_path.unlink()
+
+    result = broken_mods.extract_selected_zips("OuterZip", app_config, conn, ["Outer.zip"])
+
+    assert result["installed"] == []
+    assert len(result["deferred"]) == 1
+    deferred_folder = app_config.sims4_mods_dir / result["deferred"][0]
+    assert deferred_folder.is_dir()
+    assert (deferred_folder / "Inner.zip").is_file()
+    assert not folder.exists()
+
+    # The deferred folder is a real, freshly extracted Mods/ folder — the
+    # next scan picks it up as its own 'unextracted_archive' entry.
+    rescanned = broken_mods.scan_broken_mods(app_config, conn)
+    assert any(r.name == result["deferred"][0] and r.reason == "unextracted_archive" for r in rescanned)
+
+
+def test_extract_selected_zips_rejects_empty_selection(app_config, conn):
+    folder = app_config.sims4_mods_dir / "ChooseOne"
+    folder.mkdir()
+    with zipfile.ZipFile(folder / "OptionA.zip", "w") as zf:
+        zf.writestr("a.package", b"a")
+
+    with pytest.raises(broken_mods.BrokenModFixError):
+        broken_mods.extract_selected_zips("ChooseOne", app_config, conn, [])
+
+    assert folder.exists()
+
+
+def test_extract_selected_zips_rejects_unknown_archive_path(app_config, conn):
+    folder = app_config.sims4_mods_dir / "ChooseOne"
+    folder.mkdir()
+    with zipfile.ZipFile(folder / "OptionA.zip", "w") as zf:
+        zf.writestr("a.package", b"a")
+
+    with pytest.raises(broken_mods.BrokenModFixError):
+        broken_mods.extract_selected_zips("ChooseOne", app_config, conn, ["DoesNotExist.zip"])
+
+    assert folder.exists()
+
+
+def test_extract_selected_zips_rejects_non_archive_reason(app_config, conn):
+    folder = app_config.sims4_mods_dir / "OptionalAddons"
+    folder.mkdir()
+
+    with pytest.raises(broken_mods.BrokenModFixError):
+        broken_mods.extract_selected_zips("OptionalAddons", app_config, conn, ["whatever.zip"])
+
+
+def _install_real_mod(app_config, conn, name="RealMod") -> str:
+    source = app_config.download_watch_dir
+    source.mkdir(parents=True, exist_ok=True)
+    package = source / f"{name}.package"
+    package.write_bytes(b"fake-dbpf-bytes")
+    return mod_manager.install(package, config=app_config, conn=conn, mod_name=name)
+
+
+def _rezip_in_place(app_config, mod_id: str, conn, zip_name: str = "Rezipped.zip") -> None:
+    """Simulates a manual "dezip then rezip directly in Mods/" edit: the
+    tracked mod's real library folder is emptied of loadable content and a
+    plain .zip containing fresh .package data is dropped in — exactly what
+    lands there since Mods/<mod_id>/ is a symlink into this same folder."""
+    library_path = Path(
+        conn.execute("SELECT library_path FROM mods WHERE id = ?", (mod_id,)).fetchone()["library_path"]
+    )
+    for f in library_path.rglob("*"):
+        if f.is_file():
+            f.unlink()
+    with zipfile.ZipFile(library_path / zip_name, "w") as zf:
+        zf.writestr("rezipped.package", b"rezipped-data")
+
+
+def test_rezipped_mod_is_detected_when_content_replaced_by_zip(app_config, conn):
+    mod_id = _install_real_mod(app_config, conn)
+    _rezip_in_place(app_config, mod_id, conn)
+
+    results = broken_mods.scan_rezipped_mods(app_config, conn)
+
+    assert len(results) == 1
+    assert results[0].mod_id == mod_id
+    assert results[0].zip_paths == ["Rezipped.zip"]
+
+
+def test_normally_installed_mod_is_not_reported_as_rezipped(app_config, conn):
+    _install_real_mod(app_config, conn)
+
+    assert broken_mods.scan_rezipped_mods(app_config, conn) == []
+
+
+def test_mod_with_loadable_content_alongside_a_stray_zip_is_not_reported(app_config, conn):
+    # Still has a real .package the game will load — a zip sitting next to
+    # it isn't "rezipped," it's just extra clutter, out of scope here.
+    mod_id = _install_real_mod(app_config, conn)
+    library_path = Path(
+        conn.execute("SELECT library_path FROM mods WHERE id = ?", (mod_id,)).fetchone()["library_path"]
+    )
+    with zipfile.ZipFile(library_path / "Extra.zip", "w") as zf:
+        zf.writestr("extra.package", b"extra")
+
+    assert broken_mods.scan_rezipped_mods(app_config, conn) == []
+
+
+def test_fix_rezipped_mod_reinstalls_from_the_zip(app_config, conn):
+    mod_id = _install_real_mod(app_config, conn)
+    _rezip_in_place(app_config, mod_id, conn)
+
+    new_mod_id = broken_mods.fix_rezipped_mod(mod_id, app_config, conn)
+
+    row = conn.execute("SELECT * FROM mods WHERE id = ?", (new_mod_id,)).fetchone()
+    assert row is not None
+    assert row["active"] == 1
+    library_path = Path(row["library_path"])
+    assert (library_path / "rezipped.package").is_file()
+    assert broken_mods.scan_rezipped_mods(app_config, conn) == []
+
+
+def test_fix_rezipped_mod_preserves_the_mod_id(app_config, conn):
+    mod_id = _install_real_mod(app_config, conn, name="RealMod")
+    _rezip_in_place(app_config, mod_id, conn)
+
+    new_mod_id = broken_mods.fix_rezipped_mod(mod_id, app_config, conn)
+
+    assert new_mod_id == mod_id
+
+
+def test_fix_rezipped_mod_backs_up_original_folder_before_deleting(app_config, conn, monkeypatch):
+    monkeypatch.setattr(backups_module, "datetime", _FakeClock)
+    mod_id = _install_real_mod(app_config, conn)
+    _rezip_in_place(app_config, mod_id, conn)
+
+    broken_mods.fix_rezipped_mod(mod_id, app_config, conn)
+
+    backups = list((app_config.library_dir / ".backups").glob(f"{mod_id}-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "Rezipped.zip").is_file()
+
+
+def test_fix_rezipped_mod_raises_when_multiple_zips_present(app_config, conn):
+    mod_id = _install_real_mod(app_config, conn)
+    _rezip_in_place(app_config, mod_id, conn, zip_name="First.zip")
+    library_path = Path(
+        conn.execute("SELECT library_path FROM mods WHERE id = ?", (mod_id,)).fetchone()["library_path"]
+    )
+    with zipfile.ZipFile(library_path / "Second.zip", "w") as zf:
+        zf.writestr("second.package", b"second")
+
+    with pytest.raises(broken_mods.BrokenModFixError):
+        broken_mods.fix_rezipped_mod(mod_id, app_config, conn)
+
+
+def test_fix_rezipped_mod_raises_when_already_loadable(app_config, conn):
+    mod_id = _install_real_mod(app_config, conn)
+
+    with pytest.raises(broken_mods.BrokenModFixError):
+        broken_mods.fix_rezipped_mod(mod_id, app_config, conn)
+
+
+def test_fix_rezipped_mod_raises_for_unknown_mod(app_config, conn):
+    with pytest.raises(broken_mods.BrokenModFixError):
+        broken_mods.fix_rezipped_mod("does-not-exist", app_config, conn)

@@ -220,8 +220,322 @@ def test_get_files_parses_version_range_and_release_type():
     assert len(files) == 1
     assert files[0].file_id == 222
     assert files[0].release_type == "release"
-    assert files[0].game_version_min == "1.100"  # lexicographic min of the raw strings
-    assert files[0].game_version_max == "1.99"
+    assert files[0].game_version_min == "1.99"  # numeric min, not lexicographic
+    assert files[0].game_version_max == "1.101"
+    assert files[0].dependencies == ()  # absent in the response -> empty, not a crash
+
+
+def test_regression_game_version_range_is_numeric_not_lexicographic():
+    """"1.100" sorts *before* "1.99" as plain strings — game_version_min/max
+    must not use that ordering (see _min_max_game_versions()'s docstring for
+    the real-world bug this caused)."""
+    client = make_client(
+        {
+            "/mods/111/files": FakeResponse(
+                json_data={
+                    "data": [
+                        {
+                            "id": 222,
+                            "fileName": "better_woohoo.zip",
+                            "downloadUrl": None,
+                            "gameVersions": ["1.99", "1.100"],
+                            "releaseType": 1,
+                        }
+                    ]
+                }
+            )
+        }
+    )
+
+    files = client.get_files(111)
+
+    assert files[0].game_version_min == "1.99"
+    assert files[0].game_version_max == "1.100"
+
+
+def test_get_files_falls_back_to_lexicographic_on_unparseable_game_version():
+    client = make_client(
+        {
+            "/mods/111/files": FakeResponse(
+                json_data={
+                    "data": [
+                        {
+                            "id": 222,
+                            "fileName": "better_woohoo.zip",
+                            "downloadUrl": None,
+                            "gameVersions": ["1.99", "not-a-version"],
+                            "releaseType": 1,
+                        }
+                    ]
+                }
+            )
+        }
+    )
+
+    files = client.get_files(111)  # must not raise
+
+    assert files[0].game_version_min == "1.99"
+    assert files[0].game_version_max == "not-a-version"
+
+
+def test_get_files_parses_dependencies():
+    client = make_client(
+        {
+            "/mods/111/files": FakeResponse(
+                json_data={
+                    "data": [
+                        {
+                            "id": 222,
+                            "fileName": "better_woohoo.zip",
+                            "downloadUrl": "https://example.com/dl/222",
+                            "gameVersions": [],
+                            "releaseType": 1,
+                            "dependencies": [
+                                {"modId": 55, "relationType": 3},
+                                {"modId": 66, "relationType": 2},
+                            ],
+                        }
+                    ]
+                }
+            )
+        }
+    )
+
+    deps = client.get_files(111)[0].dependencies
+
+    assert len(deps) == 2
+    assert (deps[0].mod_id, deps[0].relation_type) == (55, 3)
+    assert (deps[1].mod_id, deps[1].relation_type) == (66, 2)
+
+
+def test_get_file_single_fetch_parses_response():
+    client = make_client(
+        {
+            "/mods/111/files/222": FakeResponse(
+                json_data={
+                    "data": {
+                        "id": 222,
+                        "fileName": "better_woohoo.zip",
+                        "downloadUrl": "https://example.com/dl/222",
+                        "gameVersions": ["1.100"],
+                        "releaseType": 1,
+                        "dependencies": [{"modId": 55, "relationType": 3}],
+                    }
+                }
+            )
+        }
+    )
+
+    file = client.get_file(111, 222)
+
+    assert file.file_id == 222
+    assert file.dependencies == (cf.CurseForgeFileDependency(mod_id=55, relation_type=3),)
+
+
+def test_get_mod_parses_main_file_id():
+    client = make_client(
+        {
+            "/mods/111": FakeResponse(
+                json_data={"data": {"id": 111, "name": "Better Woohoo", "mainFileId": 222}}
+            )
+        }
+    )
+
+    assert client.get_mod(111).main_file_id == 222
+
+
+def test_get_mod_main_file_id_none_when_absent():
+    client = make_client({"/mods/111": FakeResponse(json_data={"data": {"id": 111, "name": "X"}})})
+
+    assert client.get_mod(111).main_file_id is None
+
+
+# --- fingerprint matching -------------------------------------------------------
+
+
+def test_get_mods_bulk_parses_results():
+    client = make_client(
+        {
+            "/mods": FakeResponse(
+                json_data={
+                    "data": [
+                        {"id": 111, "name": "Better Woohoo", "authors": [{"name": "SomeAuthor"}]},
+                        {"id": 222, "name": "Realistic Childbirth", "authors": [{"name": "OtherAuthor"}]},
+                    ]
+                }
+            )
+        }
+    )
+
+    mods = client.get_mods([111, 222])
+
+    assert [m.mod_id for m in mods] == [111, 222]
+    assert mods[0].author == "SomeAuthor"
+
+
+def test_get_mods_empty_input_makes_no_request():
+    client = make_client({})
+
+    assert client.get_mods([]) == []
+
+
+def test_match_fingerprints_correlates_via_modules_not_array_position():
+    # Realistic single-file matches: each exactMatches entry's file.modules
+    # is what actually correlates a sent fingerprint back to a modId — see
+    # match_fingerprints()'s docstring for why exactFingerprints (a plain
+    # echo of the full request) can't be used positionally.
+    client = make_client(
+        {
+            "/fingerprints": FakeResponse(
+                json_data={
+                    "data": {
+                        "exactFingerprints": [111, 222, 333],
+                        "exactMatches": [
+                            {
+                                "id": 91279,
+                                "file": {
+                                    "modId": 91279,
+                                    "fileFingerprint": 999999,
+                                    "modules": [{"name": "Thing.package", "fingerprint": 111}],
+                                },
+                            },
+                            {
+                                "id": 118813,
+                                "file": {
+                                    "modId": 118813,
+                                    "fileFingerprint": 888888,
+                                    "modules": [{"name": "Other.package", "fingerprint": 222}],
+                                },
+                            },
+                        ],
+                    }
+                }
+            )
+        }
+    )
+
+    result = client.match_fingerprints([111, 222, 333])
+
+    assert result == {111: 91279, 222: 118813}
+    assert 333 not in result  # unmatched, correctly dropped
+
+
+def test_match_fingerprints_one_file_bundling_two_sent_fingerprints():
+    # Regression for the real incident (CLAUDE.md, 2026-08-23): a single
+    # CurseForge file (e.g. a .package + .ts4script pair from one archive)
+    # can satisfy *two* of our sent fingerprints via its own modules list —
+    # exactMatches then has fewer entries than fingerprints sent, which used
+    # to desync a naive positional zip() for every pairing that followed.
+    client = make_client(
+        {
+            "/fingerprints": FakeResponse(
+                json_data={
+                    "data": {
+                        "exactFingerprints": [111, 222, 333],
+                        "exactMatches": [
+                            {
+                                "id": 555,
+                                "file": {
+                                    "modId": 555,
+                                    "fileFingerprint": 999999,
+                                    "modules": [
+                                        {"name": "Thing.package", "fingerprint": 111},
+                                        {"name": "Thing.ts4script", "fingerprint": 222},
+                                    ],
+                                },
+                            },
+                            {
+                                "id": 777,
+                                "file": {
+                                    "modId": 777,
+                                    "fileFingerprint": 888888,
+                                    "modules": [{"name": "Unrelated.package", "fingerprint": 333}],
+                                },
+                            },
+                        ],
+                    }
+                }
+            )
+        }
+    )
+
+    result = client.match_fingerprints([111, 222, 333])
+
+    assert result == {111: 555, 222: 555, 333: 777}  # not {333: 555, ...} — the old bug's shift
+
+
+def test_match_fingerprints_drops_a_fingerprint_claimed_by_two_different_matches():
+    # Should never legitimately happen — dropped rather than guessed at,
+    # same "suspicion is not confirmation" rule as everywhere else.
+    client = make_client(
+        {
+            "/fingerprints": FakeResponse(
+                json_data={
+                    "data": {
+                        "exactFingerprints": [111],
+                        "exactMatches": [
+                            {"id": 1, "file": {"modId": 1, "modules": [{"name": "A", "fingerprint": 111}]}},
+                            {"id": 2, "file": {"modId": 2, "modules": [{"name": "B", "fingerprint": 111}]}},
+                        ],
+                    }
+                }
+            )
+        }
+    )
+
+    assert client.match_fingerprints([111]) == {}
+
+
+def test_match_fingerprints_ignores_partial_matches():
+    client = make_client(
+        {
+            "/fingerprints": FakeResponse(
+                json_data={
+                    "data": {
+                        "exactFingerprints": [],
+                        "exactMatches": [],
+                        "partialMatches": [{"id": 555, "file": {"fileFingerprint": 111}}],
+                    }
+                }
+            )
+        }
+    )
+
+    assert client.match_fingerprints([111]) == {}
+
+
+def test_match_fingerprints_empty_input_makes_no_request():
+    client = make_client({})
+
+    assert client.match_fingerprints([]) == {}
+
+
+# --- curseforge_fingerprint (pure function, no network) -------------------------
+#
+# Values below are regression fixtures, not independently-sourced test
+# vectors — computed once with this implementation and then verified
+# directly against the real CurseForge API (a real installed .package file's
+# fingerprint correctly round-tripped to its real CurseForge mod — see
+# CLAUDE.md's fingerprint-matching notes). Protects against a future
+# accidental change to the hash breaking real matching silently.
+
+
+def test_curseforge_fingerprint_known_values():
+    assert cf.curseforge_fingerprint(b"") == 1540447798
+    assert cf.curseforge_fingerprint(b"hello world") == 2824650221
+
+
+def test_curseforge_fingerprint_strips_whitespace_before_hashing():
+    # CurseForge's own quirk: tab/LF/CR/space bytes are removed before
+    # hashing, so these two must hash identically.
+    assert cf.curseforge_fingerprint(b"a b\tc\nd\re") == cf.curseforge_fingerprint(b"abcde")
+
+
+def test_curseforge_fingerprint_handles_non_multiple_of_four_length():
+    # Exercises the tail-byte handling (1/2/3 leftover bytes) — a length
+    # that's an exact multiple of 4 never reaches that code path at all.
+    assert cf.curseforge_fingerprint(b"abcde") is not None
+    assert cf.curseforge_fingerprint(b"abcde") != cf.curseforge_fingerprint(b"abcd")
 
 
 # --- compat_status (pure function, no network) ---------------------------------

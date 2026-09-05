@@ -246,6 +246,53 @@ def test_delete_unknown_mod_raises(app_config, conn):
         mod_manager.delete("does-not-exist", config=app_config, conn=conn)
 
 
+def test_set_namespace_override_stores_the_value(app_config, conn, tmp_path):
+    archive = make_zip(tmp_path, "source.zip", {"mymod.package": b"data"})
+    mod_id = mod_manager.install(archive, config=app_config, conn=conn)
+
+    mod_manager.set_namespace_override(mod_id, "Corrected Namespace", conn=conn)
+
+    row = conn.execute("SELECT namespace_override FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["namespace_override"] == "Corrected Namespace"
+
+
+def test_set_namespace_override_strips_whitespace(app_config, conn, tmp_path):
+    archive = make_zip(tmp_path, "source.zip", {"mymod.package": b"data"})
+    mod_id = mod_manager.install(archive, config=app_config, conn=conn)
+
+    mod_manager.set_namespace_override(mod_id, "  Padded  ", conn=conn)
+
+    row = conn.execute("SELECT namespace_override FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["namespace_override"] == "Padded"
+
+
+def test_set_namespace_override_none_clears_it(app_config, conn, tmp_path):
+    archive = make_zip(tmp_path, "source.zip", {"mymod.package": b"data"})
+    mod_id = mod_manager.install(archive, config=app_config, conn=conn)
+    mod_manager.set_namespace_override(mod_id, "Something", conn=conn)
+
+    mod_manager.set_namespace_override(mod_id, None, conn=conn)
+
+    row = conn.execute("SELECT namespace_override FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["namespace_override"] is None
+
+
+def test_set_namespace_override_blank_string_clears_it(app_config, conn, tmp_path):
+    archive = make_zip(tmp_path, "source.zip", {"mymod.package": b"data"})
+    mod_id = mod_manager.install(archive, config=app_config, conn=conn)
+    mod_manager.set_namespace_override(mod_id, "Something", conn=conn)
+
+    mod_manager.set_namespace_override(mod_id, "   ", conn=conn)
+
+    row = conn.execute("SELECT namespace_override FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["namespace_override"] is None
+
+
+def test_set_namespace_override_unknown_mod_raises(app_config, conn):
+    with pytest.raises(mod_manager.ModManagerError):
+        mod_manager.set_namespace_override("does-not-exist", "X", conn=conn)
+
+
 # --- import_existing_folder --------------------------------------------------
 
 
