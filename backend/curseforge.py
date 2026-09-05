@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -34,6 +35,39 @@ _REQUEST_TIMEOUT = 15
 _DOWNLOAD_TIMEOUT = 30
 _DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 FINGERPRINT_BATCH_SIZE = 500  # public: callers batch match_fingerprints()/get_mods() themselves
+_SEARCH_PAGE_SIZE = 50  # CurseForge's own max for /mods/search — confirmed live, 100+ is a 400
+
+# CurseForge's /mods/search sortField is an undocumented numeric enum (the
+# public docs list the valid 1-12 range but not what each number means).
+# Confirmed empirically against the real API (see CLAUDE.md): sorting desc
+# by field 6 produces a strictly-decreasing downloadCount (TotalDownloads),
+# field 3 a strictly-decreasing dateModified (LastUpdated), field 11 a
+# strictly-decreasing dateReleased with brand-new/zero-download mods
+# (ReleaseDate), field 4 groups by name (Name), and field 2 gives CurseForge's
+# own curated "Popularity" ranking (not a pure downloadCount sort — it does
+# not correlate with either date or download count alone).
+SORT_FIELDS = {
+    "popularity": 2,
+    "downloads": 6,
+    "updated": 3,
+    "newest": 11,
+    "name": 4,
+}
+
+# CurseForge's search API has no server-side date-range filter, so a "period"
+# choice is applied client-side (here) against each result's own dateModified
+# — only within whatever single page was already fetched (see search_mods),
+# not by paging further to backfill a full page of matches. That's a
+# deliberate simplicity tradeoff: a period narrow enough to filter out most of
+# one sort's page can legitimately return few or no results, same as a search
+# query that just doesn't match much — not a bug to work around with extra
+# pagination.
+PERIOD_WINDOWS = {
+    "week": timedelta(days=7),
+    "month": timedelta(days=30),
+    "quarter": timedelta(days=90),
+    "year": timedelta(days=365),
+}
 
 _RELEASE_TYPES = {1: "release", 2: "beta", 3: "alpha"}
 
@@ -124,6 +158,8 @@ class CurseForgeMod:
     curseforge_url: str | None
     third_party_distribution_allowed: bool
     main_file_id: int | None = None
+    download_count: int = 0
+    date_modified: str | None = None  # raw ISO 8601 string, as returned by the API
 
 
 def compat_status(
@@ -146,6 +182,12 @@ def compat_status(
 
 def _version_tuple(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
+
+
+def _parse_iso(value: str) -> datetime:
+    # CurseForge timestamps end in "Z" (UTC) — fromisoformat() has accepted
+    # that directly since Python 3.11, which this project already requires.
+    return datetime.fromisoformat(value)
 
 
 def _min_max_game_versions(game_versions: list[str]) -> tuple[str | None, str | None]:
@@ -189,6 +231,8 @@ def _parse_mod(data: dict) -> CurseForgeMod:
         # blocked download of something that was actually fine.
         third_party_distribution_allowed=data.get("allowModDistribution") is not False,
         main_file_id=data.get("mainFileId"),
+        download_count=data.get("downloadCount", 0),
+        date_modified=data.get("dateModified"),
     )
 
 
@@ -258,13 +302,27 @@ class CurseForgeClient:
         return self._game_id
 
     def search_mods(
-        self, query: str, *, game_version: str | None = None, page_size: int = 20
+        self,
+        query: str,
+        *,
+        sort: str = "popularity",
+        period: str | None = None,
+        page_size: int = _SEARCH_PAGE_SIZE,
     ) -> list[CurseForgeMod]:
-        params = {"gameId": self.game_id(), "searchFilter": query, "pageSize": page_size}
-        if game_version:
-            params["gameVersion"] = game_version
+        params = {
+            "gameId": self.game_id(),
+            "searchFilter": query,
+            "pageSize": page_size,
+            "sortField": SORT_FIELDS.get(sort, SORT_FIELDS["popularity"]),
+            "sortOrder": "desc",
+        }
         payload = self._request("GET", "/mods/search", params=params)
-        return [_parse_mod(item) for item in payload.get("data", [])]
+        mods = [_parse_mod(item) for item in payload.get("data", [])]
+        window = PERIOD_WINDOWS.get(period) if period else None
+        if window:
+            cutoff = datetime.now(timezone.utc) - window
+            mods = [m for m in mods if m.date_modified and _parse_iso(m.date_modified) >= cutoff]
+        return mods
 
     def get_mod(self, mod_id: int) -> CurseForgeMod:
         payload = self._request("GET", f"/mods/{mod_id}")

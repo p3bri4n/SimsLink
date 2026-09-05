@@ -27,6 +27,7 @@ import time
 import uuid
 import webbrowser
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 import requests
@@ -56,6 +57,15 @@ from .config import Config
 
 APP_VERSION = "0.1.0"  # keep in sync with pyproject.toml's [project].version
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+
+# Module-level (not inside create_app()) so FastAPI/pydantic can resolve the
+# "CatalogSort"/"CatalogPeriod" forward references it builds from this
+# module's postponed (`from __future__ import annotations`) type hints —
+# a route-local definition isn't visible in the module namespace pydantic
+# looks the name up in, which raised a PydanticUserError ("is not fully
+# defined") at request time instead of at import time.
+CatalogSort = Literal["popularity", "downloads", "updated", "newest", "name"]
+CatalogPeriod = Literal["week", "month", "quarter", "year"]
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +300,34 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
     app.state.run_startup_scan = run_mods_rescan
     app.state.schedule_mods_rescan = schedule_mods_rescan  # exposed for tests, same idea as report_download
 
+    def mod_link_state(row: sqlite3.Row) -> str:
+        """'unlinked' | 'linked' | 'incompatible' | 'update_available'.
+
+        A single precomputed field (rather than making the frontend combine
+        curseforge_id/compat_status/latest_version itself) — mirrors how
+        compat_status is already a precomputed enum, not raw version ranges.
+
+        'update_available' requires the *latest known* file (as of the last
+        explicit POST /api/updates/check — never a live network call here)
+        to itself be compatible with the current game version, not just
+        newer; 'incompatible' requires no such update pending. A mod with an
+        update pending that ISN'T yet compatible matches neither — it stays
+        'linked', same as before an update existed, rather than guessing
+        which of the two it's closer to.
+        """
+        if not row["curseforge_id"]:
+            return "unlinked"
+        update_available = bool(row["latest_version"]) and row["latest_version"] != row["installed_version"]
+        if update_available:
+            update_compat = curseforge.compat_status(
+                row["latest_version_min"], row["latest_version_max"], config.game_version
+            )
+            if update_compat == "compatible":
+                return "update_available"
+        elif row["compat_status"] == "incompatible":
+            return "incompatible"
+        return "linked"
+
     def mod_summary(row: sqlite3.Row) -> dict:
         return {
             "id": row["id"],
@@ -299,6 +337,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             "primary_type": row["primary_type"],
             "installed_version": row["installed_version"],
             "compat_status": row["compat_status"],
+            "link_state": mod_link_state(row),
             "active": bool(row["active"]),
             "short_description": row["short_description"],
             "thumbnail_url": row["thumbnail_url"],
@@ -785,13 +824,32 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             "thumbnail_url": mod.thumbnail_url,
             "curseforge_url": mod.curseforge_url,
             "third_party_distribution_allowed": mod.third_party_distribution_allowed,
+            "download_count": mod.download_count,
+            "date_modified": mod.date_modified,
         }
 
     @app.get("/api/catalog/search")
-    def search_catalog(q: str = "") -> list[dict]:
+    def search_catalog(
+        q: str = "", sort: CatalogSort = "popularity", period: CatalogPeriod | None = None
+    ) -> list[dict]:
         client = require_client()
         try:
-            mods = client.search_mods(q, game_version=config.game_version)
+            # Regression, found 2026-09-05: filtering by config.game_version
+            # (the full auto-detected build string, e.g. "1.127.41.1030")
+            # made every search return zero results — CurseForge's gameVersion
+            # search filter needs an exact match against its own known
+            # version-string list for the game, which this build string (or
+            # even its truncated major.minor) never lands on. Confirmed live:
+            # searching "MC Command Center" returned 0 hits with the filter,
+            # 9 without. Compatibility is already computed separately, per
+            # file, once a specific mod's files are looked at (see
+            # catalog_mod_dict's own note) — this filter was never load-bearing
+            # for that, so it's dropped rather than patched to a "better" guess.
+            #
+            # An empty q browses the full catalog unfiltered (confirmed live),
+            # which is what powers the Catalog view's default landing state —
+            # sort/period narrow that down without ever requiring a typed query.
+            mods = client.search_mods(q, sort=sort, period=period)
         except curseforge.CurseForgeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return [catalog_mod_dict(mod) for mod in mods]
@@ -869,6 +927,15 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             if not files:
                 continue
             latest = files[0]
+            # Persisted regardless of update_available below — this is what
+            # lets the Library's link-status indicator show "update
+            # available" (mod_link_state() in main.py) without ever making a
+            # live network call of its own; it just reflects the outcome of
+            # this explicit, user-triggered check until the next one.
+            conn.execute(
+                "UPDATE mods SET latest_version = ?, latest_version_min = ?, latest_version_max = ? WHERE id = ?",
+                (str(latest.file_id), latest.game_version_min, latest.game_version_max, row["id"]),
+            )
             if str(latest.file_id) != (row["installed_version"] or ""):
                 results.append(
                     {
@@ -881,6 +948,7 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
                 )
             else:
                 results.append({"id": row["id"], "name": row["name"], "status": "up_to_date"})
+        conn.commit()
         return results
 
     @app.post("/api/updates/{mod_id}/apply")

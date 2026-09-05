@@ -95,6 +95,71 @@ def test_list_mods_returns_installed_mods(app_config, conn, tmp_path, client):
     assert body[0]["active"] is True
 
 
+def test_list_mods_link_state_unlinked_without_curseforge_id(app_config, conn, tmp_path, client):
+    _install_mod(app_config, conn, tmp_path, "Loose Mod")
+
+    response = client.get("/api/mods")
+
+    assert response.json()[0]["link_state"] == "unlinked"
+
+
+def test_list_mods_link_state_linked_by_default(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Linked Mod")
+    conn.execute("UPDATE mods SET curseforge_id = 111 WHERE id = ?", (mod_id,))
+    conn.commit()
+
+    response = client.get("/api/mods")
+
+    assert response.json()[0]["link_state"] == "linked"
+
+
+def test_list_mods_link_state_incompatible_when_no_update_pending(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Incompatible Mod")
+    conn.execute("UPDATE mods SET curseforge_id = 111, compat_status = 'incompatible' WHERE id = ?", (mod_id,))
+    conn.commit()
+
+    response = client.get("/api/mods")
+
+    assert response.json()[0]["link_state"] == "incompatible"
+
+
+def test_list_mods_link_state_update_available_when_latest_is_compatible(app_config, conn, tmp_path):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Updatable Mod")
+    conn.execute(
+        """UPDATE mods SET curseforge_id = 111, installed_version = '1', latest_version = '2',
+           latest_version_min = '1.0', latest_version_max = '1.200' WHERE id = ?""",
+        (mod_id,),
+    )
+    conn.commit()
+    versioned_config = dataclasses.replace(app_config, game_version="1.100")
+    test_client = TestClient(create_app(versioned_config, db_path=tmp_path / "simslink.sqlite3"))
+
+    response = test_client.get("/api/mods")
+
+    assert response.json()[0]["link_state"] == "update_available"
+
+
+def test_list_mods_link_state_stays_linked_when_pending_update_is_not_yet_compatible(app_config, conn, tmp_path):
+    # An update is pending, but that update itself isn't compatible with the
+    # current game version either — neither "incompatible" (that label is
+    # reserved for when no update is pending at all) nor "update_available"
+    # (the update wouldn't actually fix anything); falls back to "linked".
+    mod_id = _install_mod(app_config, conn, tmp_path, "Pending Mod")
+    conn.execute(
+        """UPDATE mods SET curseforge_id = 111, compat_status = 'incompatible',
+           installed_version = '1', latest_version = '2',
+           latest_version_min = '1.200', latest_version_max = '1.200' WHERE id = ?""",
+        (mod_id,),
+    )
+    conn.commit()
+    versioned_config = dataclasses.replace(app_config, game_version="1.100")
+    test_client = TestClient(create_app(versioned_config, db_path=tmp_path / "simslink.sqlite3"))
+
+    response = test_client.get("/api/mods")
+
+    assert response.json()[0]["link_state"] == "linked"
+
+
 # --- /api/conflicts ---------------------------------------------------------------
 
 
@@ -802,11 +867,13 @@ class _FakeCurseForgeClient:
         # call counter.
         self._fail_fingerprint_matches_with = fail_fingerprint_matches_with
         self.download_calls: list[tuple[int, int]] = []
+        self.search_calls: list[tuple[str, str, str | None]] = []
 
     def verify_key(self) -> bool:
         return True
 
-    def search_mods(self, query: str, *, game_version=None):
+    def search_mods(self, query: str, *, sort="popularity", period=None):
+        self.search_calls.append((query, sort, period))
         if self._fail_search is not None:
             raise self._fail_search
         return self._search_results
@@ -877,6 +944,59 @@ def test_catalog_search_returns_results_in_direct_mode(app_config, tmp_path, mon
     assert body[0]["name"] == "Better Woohoo"
     assert body[0]["third_party_distribution_allowed"] is True
     assert "compat_status" not in body[0]
+    assert body[0]["download_count"] == 0
+    assert body[0]["date_modified"] is None
+
+
+def test_catalog_search_defaults_to_unfiltered_browse_with_popularity_sort(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient(search_results=[_make_mod()])
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.get("/api/catalog/search")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert fake.search_calls == [("", "popularity", None)]
+
+
+def test_catalog_search_forwards_sort_and_period(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient(search_results=[_make_mod()])
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.get("/api/catalog/search", params={"sort": "newest", "period": "month"})
+
+    assert response.status_code == 200
+    assert fake.search_calls == [("", "newest", "month")]
+
+
+def test_catalog_search_rejects_unknown_sort(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient(search_results=[_make_mod()])
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.get("/api/catalog/search", params={"sort": "nonsense"})
+
+    assert response.status_code == 422
+
+
+def test_regression_catalog_search_does_not_filter_by_game_version(app_config, tmp_path, monkeypatch):
+    """CurseForge's gameVersion search filter needs an exact match against
+    its own known version-string list — the full auto-detected build string
+    (e.g. "1.127.41.1030") never lands on one, so passing it made every
+    catalog search return zero results (confirmed live against the real API:
+    searching "MC Command Center" went from 9 hits to 0 once GAME_VERSION
+    auto-detection started populating config.game_version). Compatibility is
+    computed separately, per file, once a mod's files are looked at — this
+    filter was never load-bearing for that.
+    """
+    fake = _FakeCurseForgeClient(search_results=[_make_mod()])
+    versioned_config = dataclasses.replace(app_config, game_version="1.127.41.1030")
+    direct = _direct_client(versioned_config, tmp_path, monkeypatch, fake)
+
+    response = direct.get("/api/catalog/search", params={"q": "MC Command Center"})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert fake.search_calls == [("MC Command Center", "popularity", None)]
 
 
 def test_catalog_search_curseforge_error_returns_502(app_config, tmp_path, monkeypatch):
@@ -1024,6 +1144,11 @@ def test_updates_check_reports_available_and_up_to_date(app_config, conn, tmp_pa
     assert by_id[current_id]["status"] == "up_to_date"
     assert by_id[outdated_id]["status"] == "update_available"
     assert by_id[outdated_id]["latest_file_id"] == 555
+
+    # Persisted for the Library's link-status indicator (mod_link_state() in
+    # main.py) to read later without a live network call of its own.
+    row = conn.execute("SELECT latest_version FROM mods WHERE id = ?", (outdated_id,)).fetchone()
+    assert row["latest_version"] == "555"
 
 
 def test_updates_apply_installs_new_version(app_config, conn, tmp_path, monkeypatch):

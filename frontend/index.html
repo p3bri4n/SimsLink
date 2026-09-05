@@ -332,9 +332,23 @@
           <input type="text" id="catalogSearchInput" data-i18n-placeholder="catalog.search_placeholder">
         </div>
         <button class="btn primary" id="catalogSearchButton" data-i18n="catalog.search_button">Search</button>
+        <select id="catalogSortSelect">
+          <option value="popularity" data-i18n="catalog.sort_popularity">Most popular</option>
+          <option value="downloads" data-i18n="catalog.sort_downloads">Most downloaded</option>
+          <option value="updated" data-i18n="catalog.sort_updated">Recently updated</option>
+          <option value="newest" data-i18n="catalog.sort_newest">Newest released</option>
+          <option value="name" data-i18n="catalog.sort_name">Name (A–Z)</option>
+        </select>
+        <select id="catalogPeriodSelect">
+          <option value="" data-i18n="catalog.period_all">All time</option>
+          <option value="week" data-i18n="catalog.period_week">Last week</option>
+          <option value="month" data-i18n="catalog.period_month">Last month</option>
+          <option value="quarter" data-i18n="catalog.period_quarter">Last 3 months</option>
+          <option value="year" data-i18n="catalog.period_year">Last year</option>
+        </select>
       </div>
 
-      <div id="catalogResults" class="catalog-list"></div>
+      <div id="catalogResults" class="grid"></div>
     </section>
 
     <section id="view-updates" class="view" hidden>

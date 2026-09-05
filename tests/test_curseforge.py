@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import requests
 
@@ -194,6 +196,120 @@ def test_search_mods_respects_explicit_distribution_disallowed():
     )
 
     assert client.search_mods("x")[0].third_party_distribution_allowed is False
+
+
+def test_search_mods_defaults_to_popularity_sort():
+    session = FakeSession(
+        {"/games": FakeResponse(json_data=GAMES_PAYLOAD), "/mods/search": FakeResponse(json_data={"data": []})}
+    )
+    client = cf.CurseForgeClient("test-key", session=session)
+
+    client.search_mods("x")
+
+    _, _, params = session.calls[-1]
+    assert params["sortField"] == cf.SORT_FIELDS["popularity"]
+    assert params["sortOrder"] == "desc"
+
+
+def test_search_mods_sends_sort_field_for_named_sort():
+    session = FakeSession(
+        {"/games": FakeResponse(json_data=GAMES_PAYLOAD), "/mods/search": FakeResponse(json_data={"data": []})}
+    )
+    client = cf.CurseForgeClient("test-key", session=session)
+
+    client.search_mods("x", sort="newest")
+
+    _, _, params = session.calls[-1]
+    assert params["sortField"] == cf.SORT_FIELDS["newest"]
+
+
+def test_search_mods_parses_download_count_and_date_modified():
+    client = make_client(
+        {
+            "/games": FakeResponse(json_data=GAMES_PAYLOAD),
+            "/mods/search": FakeResponse(
+                json_data={
+                    "data": [
+                        {
+                            "id": 1,
+                            "name": "X",
+                            "summary": "",
+                            "authors": [],
+                            "categories": [],
+                            "downloadCount": 12345,
+                            "dateModified": "2026-08-01T00:00:00Z",
+                        }
+                    ]
+                }
+            ),
+        }
+    )
+
+    mod = client.search_mods("x")[0]
+
+    assert mod.download_count == 12345
+    assert mod.date_modified == "2026-08-01T00:00:00Z"
+
+
+def test_search_mods_period_filters_out_mods_outside_the_window():
+    now = datetime.now(timezone.utc)
+    recent = (now - timedelta(days=2)).isoformat()
+    old = (now - timedelta(days=400)).isoformat()
+    client = make_client(
+        {
+            "/games": FakeResponse(json_data=GAMES_PAYLOAD),
+            "/mods/search": FakeResponse(
+                json_data={
+                    "data": [
+                        {
+                            "id": 1,
+                            "name": "Recent",
+                            "summary": "",
+                            "authors": [],
+                            "categories": [],
+                            "dateModified": recent,
+                        },
+                        {"id": 2, "name": "Old", "summary": "", "authors": [], "categories": [], "dateModified": old},
+                    ]
+                }
+            ),
+        }
+    )
+
+    results = client.search_mods("x", period="week")
+
+    assert [m.name for m in results] == ["Recent"]
+
+
+def test_search_mods_period_excludes_mods_missing_date_modified():
+    client = make_client(
+        {
+            "/games": FakeResponse(json_data=GAMES_PAYLOAD),
+            "/mods/search": FakeResponse(
+                json_data={"data": [{"id": 1, "name": "NoDate", "summary": "", "authors": [], "categories": []}]}
+            ),
+        }
+    )
+
+    assert client.search_mods("x", period="year") == []
+
+
+def test_search_mods_without_a_period_ignores_missing_dates():
+    client = make_client(
+        {
+            "/games": FakeResponse(json_data=GAMES_PAYLOAD),
+            "/mods/search": FakeResponse(
+                json_data={
+                    "data": [
+                        {"id": 1, "name": "A", "summary": "", "authors": [], "categories": []},
+                        {"id": 2, "name": "B", "summary": "", "authors": [], "categories": []},
+                    ]
+                }
+            ),
+        }
+    )
+
+    assert len(client.search_mods("x")) == 2
 
 
 def test_get_files_parses_version_range_and_release_type():

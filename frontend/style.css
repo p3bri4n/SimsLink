@@ -79,7 +79,7 @@ body {
   backdrop-filter: blur(8px);
 }
 .brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 700; font-size: 22px; letter-spacing: -0.01em; }
-.brand-logo { width: 32px; height: 32px; border-radius: 7px; flex-shrink: 0; }
+.brand-logo { width: 24px; height: 24px; border-radius: 5px; flex-shrink: 0; }
 
 .search-wrap { position: relative; width: 360px; }
 .search-wrap input {
@@ -614,6 +614,8 @@ body {
    space-between. */
 .link-status { display: flex; align-items: center; gap: 6px; color: var(--danger); }
 .link-status.is-linked { color: var(--accent); }
+.link-status.is-incompatible { color: var(--warn); }
+.link-status.is-update-available { color: var(--purple); }
 .link-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
 .toggle {
   width: 30px; height: 17px; background: var(--border); border-radius: 100px; position: relative; cursor: pointer; flex-shrink: 0;

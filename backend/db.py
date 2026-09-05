@@ -227,6 +227,21 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        12,
+        """
+        -- The *latest known* file's game-version range, as of the last
+        -- explicit POST /api/updates/check run (Direct Mode only) — deliberately
+        -- separate from game_version_min/max above, which describe the
+        -- *currently installed* file. Lets the Library badge a mod as
+        -- "update available" only when that latest file is itself compatible
+        -- with the current game version, not just newer. `latest_version`
+        -- (already existed, unused until now) is what's compared against
+        -- installed_version to decide whether an update is pending at all.
+        ALTER TABLE mods ADD COLUMN latest_version_min TEXT;
+        ALTER TABLE mods ADD COLUMN latest_version_max TEXT;
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

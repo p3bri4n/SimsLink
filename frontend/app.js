@@ -2145,23 +2145,36 @@ function buildCard(mod, inferredTags, hasIssue, isDuplicate, isIdenticalContent,
   return card;
 }
 
-// Green+"Lié" when the mod has a real curseforge_id (Direct Mode catalog
-// install, or the header's CurseForge fingerprint-match popup for a loose
-// import), red+"Non lié" otherwise — replaces both the old text-only "Lié"
-// badge that used to ride along in the compat pill (removed entirely, see
-// CLAUDE.md) and this indicator's own first version (a bare dot with no
-// label, tucked next to the action icons). Card-only, at the left edge of
-// the bottom meta row (the toggle/action icons occupy the right, via
-// .card-meta's justify-content: space-between) — same underlying signal as
-// renderLinkedFilterChip()'s filter count.
+// Four states, driven by mod.link_state (precomputed backend-side by
+// mod_link_state() in main.py — combines curseforge_id/compat_status/
+// latest_version, since "is an update available AND is it itself
+// compatible" needs a real network-derived value, not something this
+// component should guess at from raw fields): red "Non lié" when unlinked,
+// green "Lié" for a plain link, orange "Incompatible" when linked but the
+// installed file is incompatible with no update pending, purple "MAJ
+// disponible" when a pending update is itself confirmed compatible. Card-
+// only, at the left edge of the bottom meta row (the toggle/action icons
+// occupy the right, via .card-meta's justify-content: space-between) — same
+// underlying link signal as renderLinkedFilterChip()'s filter count.
+const LINK_STATE_CLASSES = {
+  linked: "is-linked",
+  incompatible: "is-incompatible",
+  update_available: "is-update-available",
+};
+const LINK_STATE_LABEL_KEYS = {
+  unlinked: "library.link_status.unlinked_label",
+  linked: "library.link_status.linked_label",
+  incompatible: "library.link_status.incompatible_label",
+  update_available: "library.link_status.update_available_label",
+};
 function buildLinkStatusIndicator(mod) {
-  const linked = !!mod.curseforge_id;
+  const state = mod.link_state || (mod.curseforge_id ? "linked" : "unlinked");
   const wrap = document.createElement("span");
-  wrap.className = "link-status" + (linked ? " is-linked" : "");
+  wrap.className = "link-status" + (LINK_STATE_CLASSES[state] ? " " + LINK_STATE_CLASSES[state] : "");
   const dot = document.createElement("span");
   dot.className = "link-status-dot";
   wrap.appendChild(dot);
-  wrap.append(t(linked ? "library.link_status.linked_label" : "library.link_status.unlinked_label"));
+  wrap.append(t(LINK_STATE_LABEL_KEYS[state] || LINK_STATE_LABEL_KEYS.unlinked));
   return wrap;
 }
 
@@ -2240,22 +2253,36 @@ function initCatalogView() {
   const direct = !!(state.status && state.status.direct_mode);
   document.getElementById("catalogAssistedNotice").hidden = direct;
   document.getElementById("catalogSearchBar").hidden = !direct;
-  if (!direct || state.catalogWired) return;
+  if (!direct) return;
 
+  if (state.catalogWired) return;
   state.catalogWired = true;
   document.getElementById("catalogSearchButton").addEventListener("click", doCatalogSearch);
   document.getElementById("catalogSearchInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") doCatalogSearch();
   });
+  document.getElementById("catalogSortSelect").addEventListener("change", doCatalogSearch);
+  document.getElementById("catalogPeriodSelect").addEventListener("change", doCatalogSearch);
+
+  // An empty query browses the full catalog (confirmed against the real
+  // API — see backend/main.py's search_catalog) — this is what makes the
+  // view show something the moment it's opened, sorted by whatever the
+  // selects default to (Most popular / All time), instead of sitting empty
+  // until the user types a search.
+  doCatalogSearch();
 }
 
 async function doCatalogSearch() {
   const query = document.getElementById("catalogSearchInput").value.trim();
+  const sort = document.getElementById("catalogSortSelect").value;
+  const period = document.getElementById("catalogPeriodSelect").value;
   const results = document.getElementById("catalogResults");
   results.innerHTML = "";
+  const params = new URLSearchParams({ q: query, sort });
+  if (period) params.set("period", period);
   let mods;
   try {
-    mods = await apiRequest(`/api/catalog/search?q=${encodeURIComponent(query)}`);
+    mods = await apiRequest(`/api/catalog/search?${params.toString()}`);
   } catch (err) {
     showError("catalogErrorBanner", t("catalog.search_error", { error: err.message }));
     return;
@@ -2264,28 +2291,52 @@ async function doCatalogSearch() {
     results.appendChild(elementWithText("div", "empty-state", t("catalog.no_results")));
     return;
   }
-  mods.forEach((mod) => results.appendChild(buildCatalogRow(mod)));
+  mods.forEach((mod) => results.appendChild(buildCatalogCard(mod)));
 }
 
-function buildCatalogRow(mod) {
-  const row = document.createElement("div");
-  row.className = "catalog-row";
+// Reuses the Library grid's own .card/.thumb/.card-body/.card-meta styling
+// (see buildCard() in app.js) so catalog results read as the same visual
+// language as installed mods, just with an Install/Open-on-CurseForge action
+// where the Library card has its enable/disable toggle.
+function buildCatalogCard(mod) {
+  const card = document.createElement("div");
+  card.className = "card";
 
-  row.appendChild(elementWithText("div", "avatar", initials(mod.name)));
+  const thumb = document.createElement("div");
+  thumb.className = "thumb";
+  if (mod.thumbnail_url) {
+    const img = document.createElement("img");
+    img.className = "thumb-image";
+    img.src = mod.thumbnail_url;
+    img.alt = "";
+    img.loading = "lazy";
+    img.addEventListener("error", () => {
+      img.remove();
+      thumb.appendChild(buildCatalogThumbInitial(mod));
+    });
+    thumb.appendChild(img);
+  } else {
+    thumb.appendChild(buildCatalogThumbInitial(mod));
+  }
+  card.appendChild(thumb);
 
-  const info = document.createElement("div");
-  info.className = "info";
+  const body = document.createElement("div");
+  body.className = "card-body";
   const title = document.createElement("h3");
   title.appendChild(document.createTextNode(mod.name));
-  if (mod.author) {
-    title.appendChild(elementWithText("span", "author", mod.author));
-  }
-  info.appendChild(title);
-  info.appendChild(elementWithText("p", null, mod.short_description || ""));
-  row.appendChild(info);
+  if (mod.author) title.appendChild(elementWithText("span", "author", mod.author));
+  body.appendChild(title);
+  body.appendChild(elementWithText("p", null, mod.short_description || ""));
+
+  const meta = document.createElement("div");
+  meta.className = "card-meta";
+  const stats = [];
+  if (mod.download_count) stats.push(t("catalog.downloads_count", { count: formatCompactNumber(mod.download_count) }));
+  if (mod.date_modified) stats.push(t("catalog.updated_on", { date: formatInstallDate(mod.date_modified) }));
+  meta.appendChild(elementWithText("span", null, stats.join(" · ")));
 
   const action = document.createElement("button");
-  action.className = "btn" + (mod.third_party_distribution_allowed ? " primary" : "");
+  action.className = "btn btn-sm" + (mod.third_party_distribution_allowed ? " primary" : "");
   if (mod.third_party_distribution_allowed) {
     action.textContent = t("catalog.install_button");
     action.addEventListener("click", () => installFromCatalog(mod, action));
@@ -2293,9 +2344,23 @@ function buildCatalogRow(mod) {
     action.textContent = t("catalog.open_on_curseforge_button");
     action.addEventListener("click", () => openExternal(mod.curseforge_url));
   }
-  row.appendChild(action);
+  const metaActions = document.createElement("span");
+  metaActions.className = "card-meta-actions";
+  metaActions.appendChild(action);
+  meta.appendChild(metaActions);
+  body.appendChild(meta);
 
-  return row;
+  card.appendChild(body);
+  return card;
+}
+
+function buildCatalogThumbInitial(mod) {
+  const initialEl = document.createElement("span");
+  initialEl.className = "initial";
+  const label = initials(mod.name);
+  initialEl.textContent = label;
+  if (label.length > 4) initialEl.classList.add("long");
+  return initialEl;
 }
 
 async function installFromCatalog(mod, button) {
@@ -4125,6 +4190,13 @@ function closeMergeComparison() {
   document.getElementById("mergeCompareReliability").innerHTML = "";
   state.mergeCompareGroup = null;
   state.mergeCompareSelected = new Set();
+}
+
+// "14 341 713" -> "14M" (or "14 M", "14 mille", ... — whatever the current
+// UI language's own compact-notation convention is; Intl handles the
+// abbreviation letter/spacing per locale instead of this hardcoding "k"/"M").
+function formatCompactNumber(n) {
+  return new Intl.NumberFormat(state.lang || undefined, { notation: "compact" }).format(n);
 }
 
 function formatInstallDate(isoString) {
