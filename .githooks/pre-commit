@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Bumps the app version to YY.MM.DD.HHMM (UTC, at commit time) and stages it
+# alongside whatever else is already staged for this commit.
+#
+# Not a git hook by default — hooks under .git/hooks/ aren't versioned, so
+# this lives here instead and needs a one-time opt-in per clone:
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+REPO_DIR="$(git rev-parse --show-toplevel)"
+VERSION="$(date -u +%y.%m.%d.%H%M)"
+
+# pyproject.toml's [project].version
+sed -i -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$REPO_DIR/pyproject.toml"
+
+# backend/main.py's APP_VERSION constant — the comment there already says
+# "keep in sync with pyproject.toml's [project].version", this is what keeps
+# that true automatically instead of relying on remembering to do it by hand.
+sed -i -E "s/^APP_VERSION = \"[^\"]*\"(.*)/APP_VERSION = \"$VERSION\"\1/" "$REPO_DIR/backend/main.py"
+
+git add "$REPO_DIR/pyproject.toml" "$REPO_DIR/backend/main.py"

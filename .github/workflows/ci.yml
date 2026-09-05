@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # pywebview isn't imported by anything the test suite touches (desktop.py,
+      # the only importer, is out of scope for pytest), but its own
+      # dependencies can still need these at install time on a bare runner —
+      # same packages README's "Getting started" already documents.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-webkit2-4.0
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest

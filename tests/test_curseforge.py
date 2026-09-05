@@ -209,6 +209,19 @@ def test_search_mods_defaults_to_popularity_sort():
     _, _, params = session.calls[-1]
     assert params["sortField"] == cf.SORT_FIELDS["popularity"]
     assert params["sortOrder"] == "desc"
+    assert params["index"] == 0
+
+
+def test_search_mods_sends_index_for_pagination():
+    session = FakeSession(
+        {"/games": FakeResponse(json_data=GAMES_PAYLOAD), "/mods/search": FakeResponse(json_data={"data": []})}
+    )
+    client = cf.CurseForgeClient("test-key", session=session)
+
+    client.search_mods("x", index=50)
+
+    _, _, params = session.calls[-1]
+    assert params["index"] == 50
 
 
 def test_search_mods_sends_sort_field_for_named_sort():
@@ -510,6 +523,7 @@ def test_match_fingerprints_correlates_via_modules_not_array_position():
                             {
                                 "id": 91279,
                                 "file": {
+                                    "id": 4001,
                                     "modId": 91279,
                                     "fileFingerprint": 999999,
                                     "modules": [{"name": "Thing.package", "fingerprint": 111}],
@@ -518,6 +532,7 @@ def test_match_fingerprints_correlates_via_modules_not_array_position():
                             {
                                 "id": 118813,
                                 "file": {
+                                    "id": 4002,
                                     "modId": 118813,
                                     "fileFingerprint": 888888,
                                     "modules": [{"name": "Other.package", "fingerprint": 222}],
@@ -532,7 +547,7 @@ def test_match_fingerprints_correlates_via_modules_not_array_position():
 
     result = client.match_fingerprints([111, 222, 333])
 
-    assert result == {111: 91279, 222: 118813}
+    assert result == {111: (91279, 4001), 222: (118813, 4002)}
     assert 333 not in result  # unmatched, correctly dropped
 
 
@@ -552,6 +567,7 @@ def test_match_fingerprints_one_file_bundling_two_sent_fingerprints():
                             {
                                 "id": 555,
                                 "file": {
+                                    "id": 5001,
                                     "modId": 555,
                                     "fileFingerprint": 999999,
                                     "modules": [
@@ -563,6 +579,7 @@ def test_match_fingerprints_one_file_bundling_two_sent_fingerprints():
                             {
                                 "id": 777,
                                 "file": {
+                                    "id": 5002,
                                     "modId": 777,
                                     "fileFingerprint": 888888,
                                     "modules": [{"name": "Unrelated.package", "fingerprint": 333}],
@@ -577,7 +594,8 @@ def test_match_fingerprints_one_file_bundling_two_sent_fingerprints():
 
     result = client.match_fingerprints([111, 222, 333])
 
-    assert result == {111: 555, 222: 555, 333: 777}  # not {333: 555, ...} — the old bug's shift
+    # not {333: (555, ...), ...} — the old bug's shift
+    assert result == {111: (555, 5001), 222: (555, 5001), 333: (777, 5002)}
 
 
 def test_match_fingerprints_drops_a_fingerprint_claimed_by_two_different_matches():
@@ -590,8 +608,14 @@ def test_match_fingerprints_drops_a_fingerprint_claimed_by_two_different_matches
                     "data": {
                         "exactFingerprints": [111],
                         "exactMatches": [
-                            {"id": 1, "file": {"modId": 1, "modules": [{"name": "A", "fingerprint": 111}]}},
-                            {"id": 2, "file": {"modId": 2, "modules": [{"name": "B", "fingerprint": 111}]}},
+                            {
+                                "id": 1,
+                                "file": {"id": 6001, "modId": 1, "modules": [{"name": "A", "fingerprint": 111}]},
+                            },
+                            {
+                                "id": 2,
+                                "file": {"id": 6002, "modId": 2, "modules": [{"name": "B", "fingerprint": 111}]},
+                            },
                         ],
                     }
                 }

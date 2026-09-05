@@ -3,6 +3,7 @@
 
 **A Linux-native mod manager for The Sims 4.**
 
+[![CI](https://github.com/p3bri4n/SimsLink/actions/workflows/ci.yml/badge.svg)](https://github.com/p3bri4n/SimsLink/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-33E6A6.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-1D8F68.svg)](#)
 [![Python](https://img.shields.io/badge/python-3.11%2B-1D8F68.svg)](#)
@@ -19,6 +20,18 @@ There is no official CurseForge Mod Manager for Linux — the official client is
 SimsLink exists to close that gap, with one thing most mod managers don't attempt at all: **figuring out which mod actually broke your game.** It reads the game's own exception log, cross-references it against your installed mods, and — when the log alone isn't enough — walks you through an automated binary-search process to isolate the culprit.
 
 It's a personal, non-commercial, open-source project, built around respect for how the game actually loads mods and for how mod authors have chosen to distribute their work.
+
+## Screenshots
+
+<!-- Placeholders — swap assets/screenshot-{1,2,3,4}.png for real captures whenever they're ready; the layout/links don't need to change. -->
+<table>
+<tr>
+<td width="25%"><a href="assets/screenshot-1.png"><img src="assets/screenshot-1.png" alt="Library view" width="100%"></a></td>
+<td width="25%"><a href="assets/screenshot-2.png"><img src="assets/screenshot-2.png" alt="Catalog view" width="100%"></a></td>
+<td width="25%"><a href="assets/screenshot-3.png"><img src="assets/screenshot-3.png" alt="Crash diagnosis" width="100%"></a></td>
+<td width="25%"><a href="assets/screenshot-4.png"><img src="assets/screenshot-4.png" alt="Settings view" width="100%"></a></td>
+</tr>
+</table>
 
 ## Features
 
@@ -78,11 +91,13 @@ pytest
 
 ## Status
 
-This project is in active development. Not yet packaged for release — see the [project brief](brief-sims4-mod-manager.md) for the full technical spec, and `CLAUDE.md` for contributor/AI-assistant guidelines.
+This project is in active development. Not yet packaged for release — see the [project brief](docs/brief-sims4-mod-manager.md) for the full technical spec, and `CLAUDE.md` for contributor/AI-assistant guidelines.
 
 ## Contributing
 
 Issues and pull requests are welcome. Please read `CLAUDE.md` first — it documents the game's mod-loading constraints and the project's conventions (English-only code/comments, mandatory tests for any change touching mod placement, crash parsing, or dependency detection).
+
+Run `git config core.hooksPath .githooks` once per clone to enable the pre-commit hook that stamps `pyproject.toml`/`backend/main.py`'s version as `YY.MM.DD.HHMM` (UTC) on every commit.
 
 ## License
 
@@ -92,3 +107,4 @@ MIT — see [LICENSE](LICENSE).
 
 - The Sims 4 modding community, whose documentation of undocumented game behavior (crash logs, cache files, `.ts4script` loading rules) made this project possible.
 - [SimsForge](https://github.com/Teyk0o/simsforge), a related project worth a look for a different take on the same problem space.
+- [CurseForge](https://www.curseforge.com/sims4), for the API and the catalog this project builds Direct Mode on top of.

@@ -308,6 +308,7 @@ class CurseForgeClient:
         sort: str = "popularity",
         period: str | None = None,
         page_size: int = _SEARCH_PAGE_SIZE,
+        index: int = 0,
     ) -> list[CurseForgeMod]:
         params = {
             "gameId": self.game_id(),
@@ -315,6 +316,7 @@ class CurseForgeClient:
             "pageSize": page_size,
             "sortField": SORT_FIELDS.get(sort, SORT_FIELDS["popularity"]),
             "sortOrder": "desc",
+            "index": index,
         }
         payload = self._request("GET", "/mods/search", params=params)
         mods = [_parse_mod(item) for item in payload.get("data", [])]
@@ -338,8 +340,15 @@ class CurseForgeClient:
         payload = self._request("POST", "/mods", json={"modIds": mod_ids})
         return [_parse_mod(item) for item in payload.get("data", [])]
 
-    def match_fingerprints(self, fingerprints: list[int]) -> dict[int, int]:
-        """Exact fingerprint matches only -> {fingerprint: curseforge_mod_id}.
+    def match_fingerprints(self, fingerprints: list[int]) -> dict[int, tuple[int, int]]:
+        """Exact fingerprint matches only -> {fingerprint: (curseforge_mod_id,
+        curseforge_file_id)}. The file id (added 2026-09-05, see
+        curseforge_match.py) is what a matched fingerprint's *exact installed
+        file* really is on CurseForge, not just which mod it belongs to —
+        callers use it to set mods.installed_version at link time instead of
+        leaving it null, which used to make every freshly-linked mod look
+        like it had a pending update the very first time /api/updates/check
+        ran (installed_version=NULL never equals a real file id).
         CurseForge's own partial-match results are deliberately ignored —
         a similarity guess, not a confirmed identity, same "suspicion is
         not confirmation" rule this app applies everywhere else. Caller is
@@ -378,21 +387,22 @@ class CurseForgeClient:
         data = payload.get("data", {})
         exact_matches = data.get("exactMatches") or []
 
-        result: dict[int, int] = {}
+        result: dict[int, tuple[int, int]] = {}
         ambiguous: set[int] = set()
         for match in exact_matches:
             file_data = match["file"]
             mod_id = file_data["modId"]
+            file_id = file_data["id"]
             candidate_fingerprints = [module.get("fingerprint") for module in file_data.get("modules") or []]
             if not candidate_fingerprints:
                 candidate_fingerprints = [file_data.get("fileFingerprint")]
             for fp in candidate_fingerprints:
                 if fp not in requested:
                     continue
-                if fp in result and result[fp] != mod_id:
+                if fp in result and result[fp] != (mod_id, file_id):
                     ambiguous.add(fp)
                     continue
-                result[fp] = mod_id
+                result[fp] = (mod_id, file_id)
         for fp in ambiguous:
             result.pop(fp, None)
         return result

@@ -211,6 +211,7 @@ body {
 .error-banner.show { display: block; }
 
 .empty-state { color: var(--text-dim); font-size: 13.5px; padding: 12px 2px; }
+.catalog-loading-more { text-align: center; color: var(--text-faint); font-size: 12.5px; padding: 16px 2px; }
 .empty-inline { color: var(--text-faint); font-size: 12.5px; }
 
 /* ---------- Conflicts banner (Library) — not in the original mockup ---------- */
@@ -361,28 +362,6 @@ body {
 /* ---------- Catalog view — not in the original mockup ---------- */
 .search-row { display: flex; gap: 10px; margin-bottom: 18px; }
 .search-row .search-wrap.search-wrap--inline { width: auto; flex: 1; }
-
-.catalog-list { display: flex; flex-direction: column; gap: 10px; }
-.catalog-row {
-  display: flex; align-items: center; gap: 14px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 12px 16px;
-}
-.catalog-row .avatar {
-  width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0;
-  background: linear-gradient(135deg, #22403A, #16302B);
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-display); font-weight: 700; font-size: 13px; color: rgba(255,255,255,0.25);
-}
-.catalog-row .info { flex: 1; min-width: 0; }
-.catalog-row .info h3 {
-  font-family: var(--font-display); font-size: 14px; margin: 0 0 3px; font-weight: 600;
-  display: flex; align-items: baseline; gap: 8px;
-}
-.catalog-row .info h3 .author { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); font-weight: 400; }
-.catalog-row .info p { font-size: 12px; color: var(--text-dim); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.catalog-row .btn { flex-shrink: 0; }
-.catalog-row .btn:disabled { opacity: 0.6; cursor: default; }
 
 .grid {
   display: grid;
@@ -608,6 +587,11 @@ body {
 .card-body p { font-size: 12px; color: var(--text-dim); margin: 0 0 10px; line-height: 1.45; min-height: 1.45em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .card-meta { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); margin-top: auto; padding-top: 8px; }
 .card-meta-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* Catalog card's download-count line (see buildCatalogCard() in app.js) —
+   truncates instead of wrapping, so a long compact-count string never grows
+   .card-meta tall enough to push the Install button below the card's fixed
+   square bounds (overflow: hidden on .card would just clip it). */
+.catalog-card-stats { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 /* Whether the mod has a real curseforge_id — green+"Lié"/red+"Non lié" at
    the left edge of the card's bottom meta row (see buildLinkStatusIndicator()
    in app.js), opposite the toggle/action icons via .card-meta's own

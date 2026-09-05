@@ -872,8 +872,8 @@ class _FakeCurseForgeClient:
     def verify_key(self) -> bool:
         return True
 
-    def search_mods(self, query: str, *, sort="popularity", period=None):
-        self.search_calls.append((query, sort, period))
+    def search_mods(self, query: str, *, sort="popularity", period=None, index=0):
+        self.search_calls.append((query, sort, period, index))
         if self._fail_search is not None:
             raise self._fail_search
         return self._search_results
@@ -899,7 +899,12 @@ class _FakeCurseForgeClient:
         if self._fail_fingerprint_matches_with is not None:
             exc, self._fail_fingerprint_matches_with = self._fail_fingerprint_matches_with, None
             raise exc
-        return {fp: self._fingerprint_matches[fp] for fp in fingerprints if fp in self._fingerprint_matches}
+        # (mod_id, file_id) tuples, per curseforge.py's real return shape —
+        # the fingerprint itself stands in for a file_id here since these
+        # tests don't care about the specific value.
+        return {
+            fp: (self._fingerprint_matches[fp], fp) for fp in fingerprints if fp in self._fingerprint_matches
+        }
 
     def get_mods(self, mod_ids):
         return [self._mods_by_id[i] for i in mod_ids if i in self._mods_by_id]
@@ -956,7 +961,7 @@ def test_catalog_search_defaults_to_unfiltered_browse_with_popularity_sort(app_c
 
     assert response.status_code == 200
     assert len(response.json()) == 1
-    assert fake.search_calls == [("", "popularity", None)]
+    assert fake.search_calls == [("", "popularity", None, 0)]
 
 
 def test_catalog_search_forwards_sort_and_period(app_config, tmp_path, monkeypatch):
@@ -966,7 +971,17 @@ def test_catalog_search_forwards_sort_and_period(app_config, tmp_path, monkeypat
     response = direct.get("/api/catalog/search", params={"sort": "newest", "period": "month"})
 
     assert response.status_code == 200
-    assert fake.search_calls == [("", "newest", "month")]
+    assert fake.search_calls == [("", "newest", "month", 0)]
+
+
+def test_catalog_search_forwards_index_for_infinite_scroll(app_config, tmp_path, monkeypatch):
+    fake = _FakeCurseForgeClient(search_results=[_make_mod()])
+    direct = _direct_client(app_config, tmp_path, monkeypatch, fake)
+
+    response = direct.get("/api/catalog/search", params={"index": 50})
+
+    assert response.status_code == 200
+    assert fake.search_calls == [("", "popularity", None, 50)]
 
 
 def test_catalog_search_rejects_unknown_sort(app_config, tmp_path, monkeypatch):
@@ -996,7 +1011,7 @@ def test_regression_catalog_search_does_not_filter_by_game_version(app_config, t
 
     assert response.status_code == 200
     assert len(response.json()) == 1
-    assert fake.search_calls == [("MC Command Center", "popularity", None)]
+    assert fake.search_calls == [("MC Command Center", "popularity", None, 0)]
 
 
 def test_catalog_search_curseforge_error_returns_502(app_config, tmp_path, monkeypatch):
@@ -1078,24 +1093,6 @@ def test_open_external_rejects_non_http_scheme(client, monkeypatch):
 
 
 # --- /api/updates --------------------------------------------------------------------
-
-
-def test_updates_checklist_lists_only_mods_with_known_link(app_config, conn, tmp_path, client):
-    linked_id = _install_mod(app_config, conn, tmp_path, "Linked Mod", filename="linked.package")
-    conn.execute(
-        "UPDATE mods SET links = ? WHERE id = ?",
-        (json.dumps({"curseforge_url": "https://www.curseforge.com/x"}), linked_id),
-    )
-    conn.commit()
-    _install_mod(app_config, conn, tmp_path, "Unlinked Mod", filename="unlinked.package")
-
-    response = client.get("/api/updates/checklist")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert len(body) == 1
-    assert body[0]["id"] == linked_id
-    assert body[0]["curseforge_url"] == "https://www.curseforge.com/x"
 
 
 def test_updates_check_requires_direct_mode(client):

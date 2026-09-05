@@ -830,7 +830,10 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
 
     @app.get("/api/catalog/search")
     def search_catalog(
-        q: str = "", sort: CatalogSort = "popularity", period: CatalogPeriod | None = None
+        q: str = "",
+        sort: CatalogSort = "popularity",
+        period: CatalogPeriod | None = None,
+        index: int = 0,
     ) -> list[dict]:
         client = require_client()
         try:
@@ -849,7 +852,12 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
             # An empty q browses the full catalog unfiltered (confirmed live),
             # which is what powers the Catalog view's default landing state —
             # sort/period narrow that down without ever requiring a typed query.
-            mods = client.search_mods(q, sort=sort, period=period)
+            #
+            # `index` (an offset, not a page number — matches CurseForge's own
+            # param name/semantics) is what the frontend's infinite-scroll
+            # advances on each call rather than replacing results; a single
+            # page (default page_size) was the whole browsable catalog before.
+            mods = client.search_mods(q, sort=sort, period=period, index=index)
         except curseforge.CurseForgeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return [catalog_mod_dict(mod) for mod in mods]
@@ -895,19 +903,6 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
         if not row["links"]:
             return None
         return (json.loads(row["links"]) or {}).get("curseforge_url")
-
-    @app.get("/api/updates/checklist")
-    def updates_checklist(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
-        # Assisted Mode's manual checklist: every installed mod with a known
-        # CurseForge URL, regardless of mode — harmless to expose in Direct
-        # Mode too, the frontend just doesn't render it there.
-        rows = conn.execute("SELECT * FROM mods ORDER BY name COLLATE NOCASE").fetchall()
-        checklist = []
-        for row in rows:
-            url = mod_curseforge_url(row)
-            if url:
-                checklist.append({"id": row["id"], "name": row["name"], "curseforge_url": url})
-        return checklist
 
     @app.post("/api/updates/check")
     def check_updates(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:

@@ -8,10 +8,25 @@ class _FakeClient:
     """Stands in for curseforge.CurseForgeClient — only the two methods
     curseforge_match.py actually calls. `fail_times` makes match_fingerprints()
     raise a transient CurseForgeError for that many calls before succeeding,
-    to test run_step()'s retry-safety."""
+    to test run_step()'s retry-safety.
 
-    def __init__(self, matches: dict[int, int], mods_by_id: dict[int, cf.CurseForgeMod], *, fail_times: int = 0):
+    `matches` is keyed by fingerprint -> mod_id, same as most tests below
+    only care about — a fake, deterministic file_id (the fingerprint itself)
+    is synthesized for the (mod_id, file_id) tuple match_fingerprints() now
+    really returns, so existing call sites don't need to invent a real-
+    looking file id just to construct this fake. Tests that actually care
+    about the file id (installed_version) pass `file_ids` explicitly."""
+
+    def __init__(
+        self,
+        matches: dict[int, int],
+        mods_by_id: dict[int, cf.CurseForgeMod],
+        *,
+        fail_times: int = 0,
+        file_ids: dict[int, int] | None = None,
+    ):
         self._matches = matches
+        self._file_ids = file_ids or {}
         self._mods_by_id = mods_by_id
         self._fail_times = fail_times
         self._fail_count = 0
@@ -23,7 +38,9 @@ class _FakeClient:
             self._fail_count += 1
             raise cf.CurseForgeError("simulated transient failure")
         self.match_calls.append(list(fingerprints))
-        return {fp: self._matches[fp] for fp in fingerprints if fp in self._matches}
+        return {
+            fp: (self._matches[fp], self._file_ids.get(fp, fp)) for fp in fingerprints if fp in self._matches
+        }
 
     def get_mods(self, mod_ids):
         self.get_mods_calls.append(list(mod_ids))
@@ -62,7 +79,11 @@ def _run_to_completion(session, conn, client, chunk_size=curseforge_match.CHUNK_
 # --- start_session() -----------------------------------------------------------------
 
 
-def test_start_session_counts_only_unlinked_loose_mods(app_config, conn, tmp_path):
+def test_start_session_counts_every_unlinked_mod_loose_or_not(app_config, conn, tmp_path):
+    # Not scoped to loose imports only (see the module docstring) — a
+    # regular multi-file mod (e.g. installed via Assisted Mode's download
+    # watcher, which never queries CurseForge either) is just as much a
+    # candidate as a loose single-file import.
     _adopt_loose_file(app_config, conn, "Loose.package", b"real content")
     source = tmp_path / "RegularMod"
     source.mkdir()
@@ -71,7 +92,7 @@ def test_start_session_counts_only_unlinked_loose_mods(app_config, conn, tmp_pat
 
     session = curseforge_match.start_session(conn)
 
-    assert session.total == 1  # the regular (non-loose) mod is excluded
+    assert session.total == 2
     assert not session.done
 
 
@@ -119,14 +140,15 @@ def test_run_step_links_a_matched_loose_mod_and_commits_immediately(app_config, 
     assert session.matched == 1
     assert session.done
     row = conn.execute(
-        "SELECT curseforge_id, author, thumbnail_url, links, category, short_description, curseforge_name, name "
-        "FROM mods WHERE id = ?",
+        "SELECT curseforge_id, author, thumbnail_url, links, category, short_description, curseforge_name, name, "
+        "installed_version FROM mods WHERE id = ?",
         (mod_id,),
     ).fetchone()
     assert row["curseforge_id"] == 111
     assert row["author"] == "RealAuthor"
     assert row["thumbnail_url"] == "https://x/y.png"
     assert row["category"] == "Gameplay"
+    assert row["installed_version"] == str(fingerprint)  # the fake's synthesized file_id
     assert row["short_description"] == "Makes it better."
     assert row["curseforge_name"] == "Better Woohoo"  # _make_mod()'s default name
     assert row["name"] == "SomeMod"  # the locally-derived name is untouched
@@ -160,6 +182,40 @@ def test_run_step_never_overwrites_existing_author(app_config, conn):
     assert row["author"] == "ExistingAuthor"
 
 
+def test_regression_run_step_fills_in_installed_version_from_the_matched_file(app_config, conn):
+    # Found while building a header "Update all" button: a mod linked via
+    # fingerprint matching never had installed_version set at all, which
+    # made /api/updates/check compare a real file id against nothing and
+    # flag it as needing an update regardless of whether it actually did —
+    # confirmed against a real 519-mod library where 509 were wrongly
+    # flagged. The matched file's own id (distinct from the mod id) is what
+    # match_fingerprints() now also returns, specifically so this can be
+    # filled in with the real installed file, not a guess.
+    mod_id = _adopt_loose_file(app_config, conn, "SomeMod.package", b"real content")
+    fingerprint = cf.curseforge_fingerprint(b"real content")
+    fake = _FakeClient({fingerprint: 111}, {111: _make_mod(mod_id=111)}, file_ids={fingerprint: 4746855})
+    session = curseforge_match.start_session(conn)
+
+    curseforge_match.run_step(session, conn, fake)
+
+    row = conn.execute("SELECT installed_version FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["installed_version"] == "4746855"
+
+
+def test_run_step_never_overwrites_existing_installed_version(app_config, conn):
+    mod_id = _adopt_loose_file(app_config, conn, "SomeMod.package", b"real content")
+    conn.execute("UPDATE mods SET installed_version = '999' WHERE id = ?", (mod_id,))
+    conn.commit()
+    fingerprint = cf.curseforge_fingerprint(b"real content")
+    fake = _FakeClient({fingerprint: 111}, {111: _make_mod(mod_id=111)}, file_ids={fingerprint: 4746855})
+    session = curseforge_match.start_session(conn)
+
+    curseforge_match.run_step(session, conn, fake)
+
+    row = conn.execute("SELECT installed_version FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["installed_version"] == "999"
+
+
 def test_run_step_processes_one_chunk_at_a_time(app_config, conn):
     for i in range(5):
         _adopt_loose_file(app_config, conn, f"Mod{i}.package", f"content {i}".encode())
@@ -189,6 +245,48 @@ def test_run_step_stopping_early_keeps_already_applied_matches(app_config, conn)
     }
     assert linked_ids  # whichever of the two was processed first got its match durably saved
     assert not session.done  # the other mod is still pending, exactly as "stopped, not lost" implies
+
+
+def test_run_step_links_a_multi_file_mod_via_any_matching_file(app_config, conn, tmp_path):
+    # The real MC Command Center scenario: several files, none of them "the"
+    # obvious representative one, but any single match is enough to link
+    # the whole mod (see the module docstring).
+    source = tmp_path / "MultiFileMod"
+    source.mkdir()
+    (source / "aaa_first.ts4script").write_bytes(b"unrelated script content")
+    (source / "zzz_last.package").write_bytes(b"the real matching file")
+    mod_id = mod_manager.import_existing_folder(source, config=app_config, conn=conn)
+    fingerprint = cf.curseforge_fingerprint(b"the real matching file")
+    fake = _FakeClient({fingerprint: 111}, {111: _make_mod(mod_id=111, name="Multi File Mod")})
+    session = curseforge_match.start_session(conn)
+
+    curseforge_match.run_step(session, conn, fake)
+
+    assert session.matched == 1
+    row = conn.execute("SELECT curseforge_id, curseforge_name FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["curseforge_id"] == 111
+    assert row["curseforge_name"] == "Multi File Mod"
+
+
+def test_run_step_only_applies_one_match_per_mod_even_with_several_candidate_files(app_config, conn, tmp_path):
+    # Two files in the same mod folder both happen to fingerprint-match
+    # (e.g. CurseForge recognizes both) — the mod should only be counted/
+    # applied once, not twice.
+    source = tmp_path / "MultiMatchMod"
+    source.mkdir()
+    (source / "one.package").write_bytes(b"content one")
+    (source / "two.package").write_bytes(b"content two")
+    mod_id = mod_manager.import_existing_folder(source, config=app_config, conn=conn)
+    fp_one = cf.curseforge_fingerprint(b"content one")
+    fp_two = cf.curseforge_fingerprint(b"content two")
+    fake = _FakeClient({fp_one: 111, fp_two: 111}, {111: _make_mod(mod_id=111)})
+    session = curseforge_match.start_session(conn)
+
+    curseforge_match.run_step(session, conn, fake)
+
+    assert session.matched == 1
+    row = conn.execute("SELECT curseforge_id FROM mods WHERE id = ?", (mod_id,)).fetchone()
+    assert row["curseforge_id"] == 111
 
 
 def test_run_step_skips_files_larger_than_cap(app_config, conn, monkeypatch):

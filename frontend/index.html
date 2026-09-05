@@ -53,6 +53,16 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             <span data-i18n="header.sync_curseforge_button">Synchronize</span>
           </button>
+          <!-- Direct Mode only — hidden/shown by renderStatus(), same
+               toggle as the two buttons above. Replaces the old dedicated
+               "Updates" page: checks every linked mod for updates
+               (POST /api/updates/check), then confirms and applies whatever
+               it finds (clickHeaderUpdateAll() in app.js) — no browsing
+               required. -->
+          <button class="btn" id="headerUpdateAllButton" hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span data-i18n="header.update_all_button">Update all</span>
+          </button>
         </div>
         <!-- Only for a failure before any popup has opened (e.g. the cache
              targets fetch itself failing) — errors that happen once a popup
@@ -72,7 +82,6 @@
   <div class="sidebar">
     <div class="nav-item active" data-view="library"><span data-i18n="nav.library">Library</span></div>
     <div class="nav-item" data-view="catalog"><span data-i18n="nav.catalog">Catalog</span></div>
-    <div class="nav-item" data-view="updates"><span data-i18n="nav.updates">Updates</span></div>
     <div class="sidebar-divider"></div>
     <div class="nav-item" data-view="settings"><span data-i18n="nav.settings">Settings</span></div>
     <div class="sidebar-foot" id="footVersion">—</div>
@@ -349,32 +358,7 @@
       </div>
 
       <div id="catalogResults" class="grid"></div>
-    </section>
-
-    <section id="view-updates" class="view" hidden>
-      <div class="sticky-head">
-        <div class="main-head">
-          <div>
-            <h1 data-i18n="updates.title">Updates</h1>
-            <div class="sub" data-i18n="updates.subtitle">Check for and apply mod updates.</div>
-          </div>
-        </div>
-
-        <div class="error-banner" id="updatesErrorBanner"></div>
-      </div>
-
-      <!-- Assisted Mode: manual checklist of CurseForge links. Direct Mode:
-           on-demand "Check for updates" against the latest CurseForge file
-           per linked mod (never automatic — CLAUDE.md's mode table). -->
-      <div id="updatesAssistedNotice" class="empty-state" hidden data-i18n="updates.assisted_notice"></div>
-      <div id="updatesChecklist" class="catalog-list" hidden></div>
-
-      <div id="updatesDirectBar" class="search-row" hidden>
-        <div class="sub" data-i18n="updates.direct_notice" style="flex:1"></div>
-        <button class="btn" id="updateAllButton" data-i18n="updates.update_all_button" hidden>Update all</button>
-        <button class="btn primary" id="updatesCheckButton" data-i18n="updates.check_button">Check for updates</button>
-      </div>
-      <div id="updatesResults" class="catalog-list" hidden></div>
+      <div id="catalogLoadingMore" class="catalog-loading-more" hidden data-i18n="catalog.loading_more">Loading more…</div>
     </section>
 
     <section id="view-settings" class="view" hidden>

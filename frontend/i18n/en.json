@@ -3,23 +3,19 @@
   "common.cancel": "Cancel",
   "common.yes": "Yes",
   "common.no": "No",
-
   "mode.direct_banner": "Direct mode: Connected to CurseForge.",
   "mode.assisted_banner": "Assisted mode: Disconnected from CurseForge.",
   "mode.direct_label": "CurseForge Connected",
   "mode.assisted_label": "CurseForge Disconnected",
-
   "header.open_mods_folder_button": "Open mods folder",
   "header.match_curseforge_button": "Try to identify mods",
   "header.sync_curseforge_button": "Synchronize",
+  "header.update_all_button": "Update all",
   "header.crash_button": "My game crashed",
   "header.clear_cache_button": "Clear cache",
-
   "nav.library": "Library",
   "nav.catalog": "Catalog",
-  "nav.updates": "Updates",
   "nav.settings": "Settings",
-
   "library.title": "Library",
   "library.subtitle": "{installed} mods installed · {active} active",
   "library.subtitle_filtered": "{visible} shown out of {installed} installed · {active} active",
@@ -77,14 +73,11 @@
   "library.edit_namespace_confirm.message": "This label is a guessed grouping, not necessarily the mod's real author — it's only ever confirmed when connected to CurseForge. Applies to all {count} mod(s) currently under it. Leave empty to go back to automatic grouping.",
   "library.edit_namespace_confirm.confirm": "Save",
   "library.script_mods_warning": "⚠ Script Mods Allowed is off in the game's options — .ts4script mods won't load.",
-
   "library.conflicts.toggle": "⚠ {count} file(s) to clean up",
   "library.conflicts.open_folder_button_title": "Open location",
   "library.conflicts.dismiss_banner_button_title": "Dismiss (reappears next launch unless cleared)",
-
   "library.broken_banner.toggle": "{count} broken mod(s)",
   "library.broken_banner.dismiss_button_title": "Dismiss (reappears next launch unless cleared)",
-
   "library.unzip_banner.toggle": "{count} mod(s) to unzip",
   "library.unzip_banner.dismiss_button_title": "Dismiss (reappears next launch unless cleared)",
   "library.unzip_banner.unzip_all_button": "Unzip all ({count})",
@@ -92,7 +85,6 @@
   "library.unzip_banner.unzip_all_confirm.message": "Extracts {count} single-archive mod(s) currently sitting unzipped. Anything with more than one archive is skipped — those need to be reviewed individually.",
   "library.unzip_banner.unzip_all_confirm.confirm": "Unzip all",
   "library.unzip_banner.unzip_all_partial_error": "Some mods couldn't be unzipped: {errors}",
-
   "library.duplicates_banner.toggle": "{count} mod(s) to de-duplicate",
   "library.duplicates_banner.dismiss_button_title": "Dismiss (reappears next launch unless cleared)",
   "library.duplicates_banner.row_label": "{name} ({count} mods)",
@@ -103,7 +95,6 @@
   "library.duplicates_banner.resolve_all_confirm.message": "Only applies to the {count} mod(s) already presumed redundant (an author or name-suffix signal points at them specifically) — groups with no such signal are left for you to compare and resolve manually.",
   "library.duplicates_banner.resolve_all_confirm.confirm": "Resolve",
   "library.duplicates_banner.resolve_all_partial_error": "Some duplicates couldn't be resolved: {errors}",
-
   "library.compat_quarantine_banner.toggle": "{count} mod(s) flagged incompatible with your game version",
   "library.compat_quarantine_banner.dismiss_button_title": "Dismiss (reappears next launch unless cleared)",
   "library.compat_quarantine_banner.review_button": "Review ({count})",
@@ -113,7 +104,6 @@
   "library.compat_quarantine_banner.confirm.message": "{count} mod(s) are pre-selected below — deselect any you want to keep active. This only disables them (reversible from Settings once they're updated), it never deletes anything.",
   "library.compat_quarantine_banner.confirm.confirm": "Pause selected",
   "library.compat_quarantine_banner.confirm.none_selected": "Select at least one mod to pause.",
-
   "library.missing_mods.toggle": "↺ {count} mod(s) you might want to reinstall",
   "library.missing_mods.source_profiles": "Was part of: {profiles}",
   "library.missing_mods.view_on_curseforge": "View on CurseForge",
@@ -127,16 +117,13 @@
   "library.conflicts.broken_mod_fix_confirm.title": "Fix unmanaged mod folder?",
   "library.conflicts.broken_mod_fix_confirm.confirm": "Fix",
   "library.conflicts.broken_mod_fix_confirm.unextracted_archive_message": "'{name}' will be backed up, then its archive ({zips}) will be extracted and installed as a new managed mod. The original folder is removed afterward.",
-
   "library.rezip_fix_confirm.title": "Re-extract this mod?",
   "library.rezip_fix_confirm.message": "'{name}' currently contains a zip archive instead of loadable files — most likely it was manually re-zipped in place. It will be backed up, then re-extracted and reinstalled from that archive.",
   "library.rezip_fix_confirm.confirm": "Re-extract",
-
   "library.link_status.linked_label": "Linked",
   "library.link_status.unlinked_label": "Not linked",
   "library.link_status.incompatible_label": "Incompatible",
   "library.link_status.update_available_label": "Update available",
-
   "library.detail.author": "by {value}",
   "library.detail.view_on_curseforge": "View on CurseForge",
   "library.detail.no_description": "No description.",
@@ -183,13 +170,10 @@
   "library.detail.no_files": "No tracked files.",
   "library.detail.open_folder_button": "Open folder",
   "library.detail.delete_button": "Delete",
-
   "library.delete_confirm.title": "Delete mod?",
   "library.delete_confirm.message": "This removes '{name}' from the library permanently.",
   "library.delete_confirm.confirm": "Delete",
-
   "library.action_error": "Action failed: {error}",
-
   "catalog.title": "Catalog",
   "catalog.subtitle": "Browse and install mods from CurseForge.",
   "catalog.assisted_mode_notice": "Catalog browsing requires a valid CurseForge API key. In Assisted Mode, browse mods in your web browser and install them via the download watcher instead.",
@@ -216,30 +200,16 @@
   "catalog.period_year": "Last year",
   "catalog.downloads_count": "{count} downloads",
   "catalog.updated_on": "Updated {date}",
-
-  "updates.title": "Updates",
-  "updates.subtitle": "Check for and apply mod updates.",
-  "updates.direct_notice": "Checking compares each installed mod's file against the latest release CurseForge currently serves.",
-  "updates.assisted_notice": "Automatic update detection isn't available in Assisted Mode. Open a mod's CurseForge page to check manually — downloading a new version will be picked up automatically by the download watcher.",
-  "updates.check_button": "Check for updates",
-  "updates.empty_direct": "No CurseForge-linked mods installed yet.",
-  "updates.empty_assisted": "No installed mods have a known CurseForge link yet.",
+  "catalog.loading_more": "Loading more…",
   "updates.no_updates": "Everything is up to date.",
-  "updates.update_available": "Update available",
-  "updates.update_button": "Update",
-  "updates.update_error": "Update failed: {error}",
   "updates.check_error": "Update check failed: {error}",
-  "updates.check_on_curseforge_button": "Check on CurseForge",
-  "updates.update_all_button": "Update all",
   "updates.update_all_title": "Update all mods?",
   "updates.update_all_message": "This will update {count} mods, backing up each one's current version first:",
   "updates.update_all_confirm": "Update all",
   "updates.update_all_partial_error": "Some updates failed: {errors}",
-
   "cache.suggest_title": "Clear stale cache?",
   "cache.suggest_message": "Mod changes can leave stale cache entries behind, which can themselves cause crashes. Clear now?",
   "cache.open_target_button_title": "Open location",
-
   "crash.modal_title": "Crash diagnosis",
   "crash.no_exception_file": "No lastException.txt found — nothing to analyze.",
   "crash.report_heading": "Occurrence {index} of {total}",
@@ -260,7 +230,6 @@
   "crash.analyze_error": "Analysis failed: {error}",
   "crash.bisection_error": "Bisection step failed: {error}",
   "crash.clear_cache_error": "Cache cleanup failed: {error}",
-
   "settings.title": "Settings",
   "settings.folders_heading": "Folders",
   "settings.backups_heading": "Backups",
@@ -308,7 +277,7 @@
   "library.merge_compare.confirm_button": "Merge ({count} selected)",
   "library.match_curseforge_modal.status": "{checked} / {total} checked — {matched} identified",
   "library.match_curseforge_modal.retrying": "CurseForge didn't respond — retrying ({attempt}/{max})…",
-  "library.match_curseforge_modal.none_to_check": "Every loose mod already has a CurseForge link — nothing to check.",
+  "library.match_curseforge_modal.none_to_check": "Every mod already has a CurseForge link — nothing to check.",
   "library.match_curseforge_modal.done": "Done — {matched} of {checked} mod(s) identified.",
   "library.match_curseforge_modal.stopped": "Stopped — {matched} of {checked} mod(s) identified so far. Nothing found so far was lost.",
   "library.match_curseforge_modal.stop_button": "Stop",
@@ -317,7 +286,6 @@
   "library.sync_curseforge_modal.none_to_check": "No linked mods to synchronize.",
   "library.sync_curseforge_modal.done": "Done — {synced} of {checked} mod(s) synced ({errors} error(s)).",
   "library.sync_curseforge_modal.stopped": "Stopped — {synced} of {checked} mod(s) synced so far. Nothing found so far was lost.",
-
   "settings.namespaces_heading": "Custom groupings",
   "settings.namespaces_notice": "Clears every manually corrected Library grouping label (the edit icon on an author-group header) — affected mods revert to normal author/prefix inference. Doesn't touch any mod's real \"author\" field.",
   "settings.clear_namespace_overrides_button": "Clear custom groupings",
@@ -326,12 +294,10 @@
   "settings.clear_namespace_overrides_confirm.message": "{count} mod(s) currently have a manually corrected grouping label. This reverts every one of them to automatic author/prefix inference — the labels themselves aren't recoverable afterward.",
   "settings.clear_namespace_overrides_confirm.confirm": "Clear all",
   "settings.clear_namespace_overrides_result": "Cleared {count} custom grouping(s).",
-
   "settings.game_heading": "Game",
   "settings.script_mods_allowed_label": "Script Mods Allowed",
   "settings.script_mods_enabled": "Enabled",
   "settings.script_mods_disabled": "Disabled — .ts4script mods won't load",
-
   "settings.profile_name_placeholder": "State name…",
   "settings.profiles_empty": "No saved states yet.",
   "settings.profiles_error": "Action failed: {error}",
@@ -339,7 +305,6 @@
   "settings.profile_saved_at": "· Saved {date}",
   "settings.activate_profile_button": "Load",
   "settings.delete_profile_button": "Delete",
-
   "settings.blacklist_heading": "Blacklist",
   "settings.blacklist_notice": "Local and manual only — flags installed mods whose name or id matches a pattern you've entered here. Never blocks anything by itself.",
   "settings.blacklist_pattern_placeholder": "Pattern to match…",
@@ -347,7 +312,6 @@
   "settings.blacklist_empty": "No blacklist patterns yet.",
   "settings.blacklist_error": "Action failed: {error}",
   "settings.remove_blacklist_button": "Remove",
-
   "settings.compat_quarantine_heading": "Compatibility quarantine",
   "settings.compat_quarantine_notice": "Mods paused by the Library's \"Incompatible mods\" banner. Reactivate here once an update (checked via \"Synchronize\") fixes them — a mod still marked incompatible is left alone.",
   "settings.compat_quarantine_empty": "No mod is currently paused.",
@@ -356,13 +320,11 @@
   "settings.compat_quarantine_forget_button": "Forget",
   "settings.release_compat_quarantine_button": "Reactivate ready mods",
   "settings.compat_quarantine_release_result": "{released} reactivated, {stillIncompatible} still incompatible, {failed} blocked on a dependency",
-
   "downloads.detected_title": "New download detected",
   "downloads.detected_message": "New file detected: {filename}. Install this mod?",
   "downloads.detected_replace_message": "New file detected: {filename}. This looks like an update for '{mod_name}'. Replace it?",
   "downloads.install_button": "Install",
   "downloads.replace_button": "Replace",
   "downloads.error": "Couldn't process that download: {error}",
-
   "common.dismiss": "Dismiss"
 }

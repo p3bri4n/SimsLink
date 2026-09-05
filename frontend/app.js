@@ -61,7 +61,9 @@ const state = {
   groupByAuthor: true,
   collapsedAuthors: new Set(),
   catalogWired: false,
-  updatesWired: false,
+  catalogIndex: 0,
+  catalogHasMore: true,
+  catalogLoadingMore: false,
   settingsWired: false,
   currentPendingDownload: null,
   updatableMods: [],
@@ -633,15 +635,16 @@ function renderStatus() {
 
   // Catalog has genuinely nothing to show without a CurseForge key (just an
   // empty notice) — hide its nav entry entirely rather than link to an
-  // empty view. Updates keeps its nav entry: its manual checklist (linked
-  // mods + "Check on CurseForge" links) still has real content in Assisted
-  // Mode, unlike Catalog.
+  // empty view.
   document.querySelector('.nav-item[data-view="catalog"]').hidden = !status.direct_mode;
   // "Try to identify mods" (openMatchCurseforgeModal()) needs a real
   // CurseForge connection to mean anything.
   document.getElementById("headerMatchCurseforgeButton").hidden = !status.direct_mode;
   // Same reasoning for "Synchronize" (openSyncCurseforgeModal()).
   document.getElementById("headerSyncCurseforgeButton").hidden = !status.direct_mode;
+  // And for "Update all" (clickHeaderUpdateAll()) — Assisted Mode has no
+  // automatic update detection at all, nothing for this button to check.
+  document.getElementById("headerUpdateAllButton").hidden = !status.direct_mode;
 }
 
 // --- mod list / grid ----------------------------------------------------------
@@ -2233,7 +2236,7 @@ function wireNav() {
   });
 }
 
-const VIEWS = ["library", "catalog", "updates", "settings"];
+const VIEWS = ["library", "catalog", "settings"];
 
 function switchView(view) {
   document.querySelectorAll(".nav-item[data-view]").forEach((el) => {
@@ -2243,11 +2246,20 @@ function switchView(view) {
     document.getElementById(`view-${v}`).hidden = v !== view;
   });
   if (view === "catalog") initCatalogView();
-  if (view === "updates") initUpdatesView();
   if (view === "settings") initSettingsView();
 }
 
 // --- catalog view ------------------------------------------------------------------
+
+// CurseForge's own max pageSize (confirmed live — 100+ is a 400) — also
+// what a "full page" means below: getting back exactly this many results
+// is the only signal available that more might follow, since totalCount in
+// the API's own pagination block is a rough cap, not a real count.
+const CATALOG_PAGE_SIZE = 50;
+// How close to the bottom of the scrollable content area (in px) before
+// the next page loads — far enough that it fires before the user actually
+// hits the end and sees a blank gap while the request is in flight.
+const CATALOG_SCROLL_THRESHOLD_PX = 400;
 
 function initCatalogView() {
   const direct = !!(state.status && state.status.direct_mode);
@@ -2263,6 +2275,12 @@ function initCatalogView() {
   });
   document.getElementById("catalogSortSelect").addEventListener("change", doCatalogSearch);
   document.getElementById("catalogPeriodSelect").addEventListener("change", doCatalogSearch);
+  // .main is the one scroll container shared by every view (see style.css) —
+  // this fires on any view's scroll, so it no-ops unless Catalog is the one
+  // currently visible. Loads the next page instead of replacing results,
+  // which is what makes browsing the catalog feel continuous instead of
+  // being stuck on whatever the first 50 results happened to be.
+  document.querySelector(".main").addEventListener("scroll", onCatalogScroll);
 
   // An empty query browses the full catalog (confirmed against the real
   // API — see backend/main.py's search_catalog) — this is what makes the
@@ -2272,26 +2290,62 @@ function initCatalogView() {
   doCatalogSearch();
 }
 
+function onCatalogScroll() {
+  if (document.getElementById("view-catalog").hidden) return;
+  if (state.catalogLoadingMore || !state.catalogHasMore) return;
+  const main = document.querySelector(".main");
+  if (main.scrollTop + main.clientHeight >= main.scrollHeight - CATALOG_SCROLL_THRESHOLD_PX) {
+    loadMoreCatalogResults();
+  }
+}
+
 async function doCatalogSearch() {
+  state.catalogIndex = 0;
+  state.catalogHasMore = true;
+  document.querySelector(".main").scrollTop = 0;
+  const results = document.getElementById("catalogResults");
+  results.innerHTML = "";
+  const mods = await fetchCatalogPage();
+  if (mods === null) return; // error already shown by fetchCatalogPage()
+  if (!mods.length) {
+    results.appendChild(elementWithText("div", "empty-state", t("catalog.no_results")));
+    return;
+  }
+  mods.forEach((mod) => results.appendChild(buildCatalogCard(mod)));
+}
+
+async function loadMoreCatalogResults() {
+  state.catalogLoadingMore = true;
+  document.getElementById("catalogLoadingMore").hidden = false;
+  const mods = await fetchCatalogPage();
+  state.catalogLoadingMore = false;
+  document.getElementById("catalogLoadingMore").hidden = true;
+  if (mods === null) return; // error already shown by fetchCatalogPage()
+  const results = document.getElementById("catalogResults");
+  mods.forEach((mod) => results.appendChild(buildCatalogCard(mod)));
+}
+
+// Shared by doCatalogSearch() (fresh search, index reset to 0) and
+// loadMoreCatalogResults() (appends the next page) — both just need "get
+// the next batch at the current index, advance it, and say whether another
+// page might follow." Returns null (rather than []) on a request failure so
+// callers can tell "no more results" apart from "the request errored."
+async function fetchCatalogPage() {
   const query = document.getElementById("catalogSearchInput").value.trim();
   const sort = document.getElementById("catalogSortSelect").value;
   const period = document.getElementById("catalogPeriodSelect").value;
-  const results = document.getElementById("catalogResults");
-  results.innerHTML = "";
-  const params = new URLSearchParams({ q: query, sort });
+  const params = new URLSearchParams({ q: query, sort, index: String(state.catalogIndex) });
   if (period) params.set("period", period);
   let mods;
   try {
     mods = await apiRequest(`/api/catalog/search?${params.toString()}`);
   } catch (err) {
     showError("catalogErrorBanner", t("catalog.search_error", { error: err.message }));
-    return;
+    return null;
   }
-  if (!mods.length) {
-    results.appendChild(elementWithText("div", "empty-state", t("catalog.no_results")));
-    return;
-  }
-  mods.forEach((mod) => results.appendChild(buildCatalogCard(mod)));
+  state.catalogIndex += mods.length;
+  state.catalogHasMore = mods.length === CATALOG_PAGE_SIZE;
+  return mods;
 }
 
 // Reuses the Library grid's own .card/.thumb/.card-body/.card-meta styling
@@ -2330,10 +2384,23 @@ function buildCatalogCard(mod) {
 
   const meta = document.createElement("div");
   meta.className = "card-meta";
-  const stats = [];
-  if (mod.download_count) stats.push(t("catalog.downloads_count", { count: formatCompactNumber(mod.download_count) }));
-  if (mod.date_modified) stats.push(t("catalog.updated_on", { date: formatInstallDate(mod.date_modified) }));
-  meta.appendChild(elementWithText("span", null, stats.join(" · ")));
+  // Kept to a single short line on purpose — the card is a fixed square
+  // with hidden overflow, so a stats line long enough to wrap (both the
+  // download count *and* a full "Updated on <date>" sentence, in French
+  // especially, easily does) grows past that budget and clips the action
+  // button below it right out of view. Just the compact count is shown;
+  // the full detail (count + last-updated date) still rides along as a
+  // hover tooltip instead of fighting for space on the card itself.
+  const statsEl = elementWithText(
+    "span",
+    "catalog-card-stats",
+    mod.download_count ? t("catalog.downloads_count", { count: formatCompactNumber(mod.download_count) }) : ""
+  );
+  const tooltipParts = [];
+  if (mod.download_count) tooltipParts.push(t("catalog.downloads_count", { count: mod.download_count.toLocaleString() }));
+  if (mod.date_modified) tooltipParts.push(t("catalog.updated_on", { date: formatInstallDate(mod.date_modified) }));
+  if (tooltipParts.length) statsEl.title = tooltipParts.join(" · ");
+  meta.appendChild(statsEl);
 
   const action = document.createElement("button");
   action.className = "btn btn-sm" + (mod.third_party_distribution_allowed ? " primary" : "");
@@ -2389,148 +2456,50 @@ async function openExternal(url) {
   }
 }
 
-// --- updates view ------------------------------------------------------------------
+// --- update all (header button) -----------------------------------------------------
 
-function initUpdatesView() {
-  const direct = !!(state.status && state.status.direct_mode);
-  document.getElementById("updatesAssistedNotice").hidden = direct;
-  document.getElementById("updatesChecklist").hidden = direct;
-  document.getElementById("updatesDirectBar").hidden = !direct;
-  document.getElementById("updatesResults").hidden = !direct;
-
-  if (direct) {
-    if (!state.updatesWired) {
-      state.updatesWired = true;
-      document.getElementById("updatesCheckButton").addEventListener("click", doCheckUpdates);
-      document.getElementById("updateAllButton").addEventListener("click", clickUpdateAll);
-    }
-    return;
-  }
-  loadUpdatesChecklist();
+// Replaces the old dedicated "Updates" page/nav entry — Direct Mode only
+// (see renderStatus()'s toggle for this button), reachable from anywhere in
+// the app like the other header actions. Assisted Mode lost its manual
+// "Check on CurseForge" checklist along with the page: there's no automatic
+// update detection possible there at all (CLAUDE.md's mode table), so a
+// header button offering to "update everything" would have nothing to do
+// in that mode anyway.
+async function applyUpdateForMod(modId) {
+  await apiRequest(`/api/updates/${encodeURIComponent(modId)}/apply`, { method: "POST" });
 }
 
-function buildLinkRow(name, buttonLabel, onClick) {
-  const row = document.createElement("div");
-  row.className = "catalog-row";
-  row.appendChild(elementWithText("div", "avatar", initials(name)));
-  const info = document.createElement("div");
-  info.className = "info";
-  info.appendChild(elementWithText("h3", null, name));
-  info.appendChild(elementWithText("p", null, ""));
-  row.appendChild(info);
-  const btn = document.createElement("button");
-  btn.className = "btn";
-  btn.textContent = buttonLabel;
-  btn.addEventListener("click", onClick);
-  row.appendChild(btn);
-  return row;
-}
-
-async function loadUpdatesChecklist() {
-  const container = document.getElementById("updatesChecklist");
-  container.innerHTML = "";
-  let items;
-  try {
-    items = await apiRequest("/api/updates/checklist");
-  } catch (err) {
-    showError("updatesErrorBanner", t("updates.check_error", { error: err.message }));
-    return;
-  }
-  if (!items.length) {
-    container.appendChild(elementWithText("div", "empty-state", t("updates.empty_assisted")));
-    return;
-  }
-  items.forEach((item) => {
-    container.appendChild(
-      buildLinkRow(item.name, t("updates.check_on_curseforge_button"), () => openExternal(item.curseforge_url))
-    );
-  });
-}
-
-async function doCheckUpdates() {
-  const results = document.getElementById("updatesResults");
-  const updateAllButton = document.getElementById("updateAllButton");
-  results.innerHTML = "";
+async function clickHeaderUpdateAll() {
   let items;
   try {
     items = await apiRequest("/api/updates/check", { method: "POST" });
   } catch (err) {
-    showError("updatesErrorBanner", t("updates.check_error", { error: err.message }));
-    return;
-  }
-  if (!items.length) {
-    results.appendChild(elementWithText("div", "empty-state", t("updates.empty_direct")));
-    updateAllButton.hidden = true;
+    // No popup open yet at this point — same floating headerErrorBanner
+    // clickClearCache() uses for a failure before its own modal exists.
+    showError("headerErrorBanner", t("updates.check_error", { error: err.message }));
     return;
   }
   const actionable = items.filter((i) => i.status === "update_available");
   const errored = items.filter((i) => i.status === "error");
   if (!actionable.length) {
-    results.appendChild(elementWithText("div", "empty-state", t("updates.no_updates")));
+    const message = errored.length
+      ? t("updates.check_error", { error: errored.map((e) => `${e.name}: ${e.error}`).join("; ") })
+      : t("updates.no_updates");
+    showError("headerErrorBanner", message);
+    return;
   }
-  actionable.forEach((item) => results.appendChild(buildUpdateRow(item)));
-  errored.forEach((item) =>
-    results.appendChild(
-      elementWithText("div", "empty-inline", t("updates.check_error", { error: `${item.name}: ${item.error}` }))
-    )
-  );
-
   state.updatableMods = actionable.map((item) => ({ id: item.id, name: item.name }));
-  updateAllButton.hidden = actionable.length < 2; // one mod is already a single click away below
-}
-
-function buildUpdateRow(item) {
-  const row = document.createElement("div");
-  row.className = "catalog-row";
-  row.appendChild(elementWithText("div", "avatar", initials(item.name)));
-  const info = document.createElement("div");
-  info.className = "info";
-  info.appendChild(elementWithText("h3", null, item.name));
-  info.appendChild(elementWithText("p", null, t("updates.update_available")));
-  row.appendChild(info);
-  const btn = document.createElement("button");
-  btn.className = "btn primary";
-  btn.textContent = t("updates.update_button");
-  btn.addEventListener("click", () => applyUpdate(item.id, btn));
-  row.appendChild(btn);
-  return row;
-}
-
-async function applyUpdateForMod(modId) {
-  await apiRequest(`/api/updates/${encodeURIComponent(modId)}/apply`, { method: "POST" });
-}
-
-async function applyUpdate(modId, button) {
-  button.disabled = true;
-  try {
-    await applyUpdateForMod(modId);
-    button.textContent = t("catalog.installed_label");
-    await loadMods();
-    await suggestCacheCleanup();
-  } catch (err) {
-    button.disabled = false;
-    showError("updatesErrorBanner", t("updates.update_error", { error: err.message }));
-  }
-}
-
-function clickUpdateAll() {
-  const updatable = state.updatableMods || [];
-  if (!updatable.length) return;
   openConfirmModal({
     title: t("updates.update_all_title"),
-    message: t("updates.update_all_message", { count: updatable.length }),
-    extraNodes: updatable.map((item) => elementWithText("div", "empty-inline", item.name)),
+    message: t("updates.update_all_message", { count: actionable.length }),
+    extraNodes: actionable.map((item) => elementWithText("div", "empty-inline", item.name)),
     confirmLabel: t("updates.update_all_confirm"),
-    onConfirm: doUpdateAll,
+    onConfirm: doHeaderUpdateAll,
   });
 }
 
-async function doUpdateAll() {
-  closeConfirm();
+async function doHeaderUpdateAll() {
   const updatable = state.updatableMods || [];
-  const button = document.getElementById("updateAllButton");
-  button.disabled = true;
-
   const failures = [];
   for (const item of updatable) {
     try {
@@ -2539,14 +2508,12 @@ async function doUpdateAll() {
       failures.push(`${item.name}: ${err.message}`);
     }
   }
-
-  button.disabled = false;
+  closeConfirm();
   await loadMods();
   if (failures.length) {
-    showError("updatesErrorBanner", t("updates.update_all_partial_error", { errors: failures.join("; ") }));
+    showError("headerErrorBanner", t("updates.update_all_partial_error", { errors: failures.join("; ") }));
   }
   if (failures.length < updatable.length) await suggestCacheCleanup(); // at least one succeeded
-  await doCheckUpdates(); // re-check: applied mods drop off, failures are re-offered
 }
 
 // --- crash diagnosis popup ---------------------------------------------------------
@@ -4262,7 +4229,7 @@ function buildConflictSide(modLite) {
 
 // Applies `action` ("disable" or "delete") to every id in `otherModIds`,
 // collecting per-mod failures instead of aborting on the first one — same
-// partial-failure shape as doUpdateAll(). Shared by the duplicate-comparison
+// partial-failure shape as doHeaderUpdateAll(). Shared by the duplicate-comparison
 // "keep this one" flow below; the caller handles refreshing state/UI and
 // reporting `errors` afterward.
 async function applyActionToMods(otherModIds, action) {
@@ -4961,6 +4928,7 @@ async function init() {
   document.getElementById("syncCurseforgeOverlay").addEventListener("click", (e) => {
     if (e.target.id === "syncCurseforgeOverlay") closeSyncCurseforgeModal();
   });
+  document.getElementById("headerUpdateAllButton").addEventListener("click", clickHeaderUpdateAll);
   document.getElementById("confirmCancelBtn").addEventListener("click", cancelConfirm);
   document.getElementById("confirmOverlay").addEventListener("click", (e) => {
     if (e.target.id === "confirmOverlay") cancelConfirm();
