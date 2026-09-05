@@ -15,15 +15,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      # pywebview isn't imported by anything the test suite touches (desktop.py,
-      # the only importer, is out of scope for pytest), but its own
-      # dependencies can still need these at install time on a bare runner —
-      # same packages README's "Getting started" already documents.
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-gi gir1.2-webkit2-4.0
-
+      # No system packages needed here: pywebview's own pip dependencies
+      # (bottle, proxy_tools, typing_extensions) are pure Python — the
+      # GTK/WebKit bits README's "Getting started" mentions are only loaded
+      # at runtime to actually open a native window, which nothing the test
+      # suite touches does (desktop.py, the only importer of pywebview
+      # itself, is out of pytest's scope). A prior version of this workflow
+      # installed gir1.2-webkit2-4.0 defensively anyway — removed after it
+      # broke CI outright: that exact package name doesn't exist on
+      # ubuntu-latest (Ubuntu renamed it to gir1.2-webkit2-4.1), and it was
+      # never actually required in the first place.
       - name: Install package
         run: pip install -e ".[dev]"
 
