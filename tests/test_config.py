@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 import backend.config as config_module
+import backend.game_options as game_options_module
 from backend.config import Config, ConfigError, DEFAULT_DOWNLOAD_WATCH_DIR, detect_symlink_support
 
 ALL_ENV_VARS = (
@@ -61,6 +62,37 @@ def test_from_env_loads_required_values(tmp_path):
     assert config.library_dir == Path("/home/user/simslink-library")
     assert config.curseforge_api_key is None
     assert config.has_api_key is False
+
+
+def test_from_env_game_version_uses_explicit_value_without_detecting(tmp_path, monkeypatch):
+    def fail_if_called(game_dir):
+        raise AssertionError("detect_game_version should not run when GAME_VERSION is set")
+
+    monkeypatch.setattr(game_options_module, "detect_game_version", fail_if_called)
+    env_path = write_env_file(tmp_path, GAME_VERSION="1.100.0.0")
+
+    config = Config.from_env(env_path)
+
+    assert config.game_version == "1.100.0.0"
+
+
+def test_from_env_game_version_falls_back_to_auto_detection_when_unset(tmp_path, monkeypatch):
+    monkeypatch.setattr(game_options_module, "detect_game_version", lambda game_dir: "1.126.78.1020")
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.game_version == "1.126.78.1020"
+
+
+def test_from_env_game_version_none_when_undetectable(tmp_path):
+    # No GAME_VERSION set and SIMS4_GAME_DIR (from write_env_file) doesn't
+    # point at a real game install, so detection has nothing to read.
+    env_path = write_env_file(tmp_path)
+
+    config = Config.from_env(env_path)
+
+    assert config.game_version is None
 
 
 def test_from_env_download_watch_dir_defaults_when_unset(tmp_path):

@@ -85,6 +85,13 @@ class Config:
 
         download_watch_dir = values.get("DOWNLOAD_WATCH_DIR", "").strip()
         game_version = values.get("GAME_VERSION", "").strip() or None
+        sims4_game_dir = Path(values["SIMS4_GAME_DIR"]).expanduser()
+        if game_version is None:
+            # Deferred import: game_options.py imports Config from this same
+            # module, so importing it at module load time would cycle.
+            from . import game_options
+
+            game_version = game_options.detect_game_version(sims4_game_dir)
         api_key = values.get("CURSEFORGE_API_KEY", "").strip() or None
         backup_retention_count = _parse_backup_retention_count(values.get("BACKUP_RETENTION_COUNT", ""))
         mods_watcher_enabled = _parse_bool(
@@ -95,7 +102,7 @@ class Config:
         log_level = _parse_log_level(values.get("LOG_LEVEL", ""))
 
         return cls(
-            sims4_game_dir=Path(values["SIMS4_GAME_DIR"]).expanduser(),
+            sims4_game_dir=sims4_game_dir,
             sims4_mods_dir=Path(values["SIMS4_MODS_DIR"]).expanduser(),
             sims4_user_dir=Path(values["SIMS4_USER_DIR"]).expanduser(),
             library_dir=Path(values["LIBRARY_DIR"]).expanduser(),

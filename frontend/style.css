@@ -18,6 +18,8 @@
   --accent-glow: rgba(51,230,166,0.18);
   --warn: #FF6A47;
   --warn-glow: rgba(255,106,71,0.18);
+  --danger: #FF3B3B;
+  --danger-glow: rgba(255,59,59,0.18);
   --unknown: #5C7674;
   --radius: 10px;
   --font-display: 'Space Grotesk', sans-serif;
@@ -42,11 +44,23 @@
   --accent-glow: rgba(29,143,104,0.14);
   --warn: #C94A2E;
   --warn-glow: rgba(201,74,46,0.12);
+  --danger: #D32F2F;
+  --danger-glow: rgba(211,47,47,0.14);
   --unknown: #93A9A4;
 }
 :root[data-theme="light"] body { background-image: none; }
 
 * { box-sizing: border-box; }
+
+/* Several components below set `display` on their own class (e.g. `.btn`,
+   `.conflicts-list`, `.warning-banner`, `.search-row`, `.catalog-list` all
+   use `display: flex`). Since an author rule always wins over the browser's
+   default `[hidden] { display: none }` at equal specificity, app.js toggling
+   `element.hidden` on any of them silently did nothing — the element stayed
+   visually flexed. `!important` here is deliberate: `hidden` must always win
+   over component styling, on every element, not just the ones that have
+   happened to need it fixed individually so far. */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background: var(--bg);
@@ -134,14 +148,32 @@ body {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-dim);
+  cursor: pointer;
 }
 .nav-item.active { background: var(--panel-raised); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
-.nav-item.disabled { opacity: 0.45; }
+.nav-item.disabled { opacity: 0.45; cursor: default; }
 .sidebar-divider { height: 1px; background: var(--border); margin: 14px 4px; }
 .sidebar-foot { margin-top: auto; padding: 12px; font-size: 11.5px; color: var(--text-faint); font-family: var(--font-mono); }
 
 /* ---------- Main content ---------- */
 .main { padding: 24px 28px; overflow-y: auto; position: relative; }
+/* Keeps the title, view actions, and error banner pinned while the rest of
+   the page (grid/list/results) scrolls underneath — sticky is relative to
+   .main's own scrollport, so this needs no extra JS or scroll listener. */
+.sticky-head {
+  position: sticky; top: -24px;
+  margin: -24px -28px 0; padding: 24px 28px 0;
+  background: var(--bg);
+  /* Same gradient as body, background-attachment: fixed anchors it to the
+     viewport (not this element's own box) so it lines up pixel-for-pixel
+     with the gradient showing through the rest of .main — otherwise this
+     solid --bg patch reads as a visibly different, flat-colored strip. */
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(51,230,166,0.05), transparent 40%),
+    radial-gradient(circle at 85% 100%, rgba(255,106,71,0.04), transparent 40%);
+  background-attachment: fixed;
+  z-index: 5;
+}
 .main-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
 .main-head h1 { font-family: var(--font-display); font-size: 22px; margin: 0; }
 .main-head .sub { color: var(--text-dim); font-size: 13px; margin-top: 4px; }
@@ -196,9 +228,16 @@ body {
   font-family: var(--font-body); font-size: 13px; font-weight: 600;
   cursor: pointer; text-align: left;
 }
-.conflicts-list { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 6px; }
-.conflicts-list .conflict-row { font-size: 12.5px; color: var(--text-dim); }
-.conflicts-list .conflict-row .kind { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); margin-right: 6px; }
+.conflicts-list {
+  padding: 0 14px 12px; display: flex; flex-direction: column; gap: 6px;
+  max-height: 40vh; overflow-y: auto;
+}
+.conflicts-list .conflict-row {
+  font-size: 12.5px; color: var(--text-dim);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+}
+.conflicts-list .conflict-row .kind { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+.conflicts-list .conflict-row .btn { margin-left: auto; flex-shrink: 0; }
 
 /* ---------- Catalog view — not in the original mockup ---------- */
 .search-row { display: flex; gap: 10px; margin-bottom: 18px; }
@@ -228,16 +267,81 @@ body {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  /* 230px, not the previous 210px — a square card needs enough absolute
+     width to also fit its (now height-constrained) title/description/meta
+     content without clipping; see .card's aspect-ratio below. */
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 16px;
 }
+.author-group-header {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-display); font-size: 16px; font-weight: 700;
+  color: var(--text); text-transform: uppercase; letter-spacing: 0.04em;
+  margin-top: 10px;
+}
+.author-group-header:first-child { margin-top: 0; }
+.author-group-header .rule { flex: 1; height: 1px; background: var(--border); }
 .grid.tile-compact {
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
 }
-.grid.tile-compact .thumb { height: 80px; }
+.grid.tile-compact .thumb { flex-basis: 45%; }
 .grid.tile-compact .card-body { padding: 8px 10px 10px; }
 .grid.tile-compact .card-body p { display: none; } /* no room for the description at this size */
+
+.grid.grid-list-mode { display: flex; flex-direction: column; gap: 8px; }
+
+.head-controls { display: flex; align-items: center; gap: 14px; }
+.simplified-names-toggle {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 12px; color: var(--text-dim); user-select: none;
+}
+.simplified-names-toggle input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+
+.view-toggle { display: flex; gap: 4px; background: var(--panel-raised); border-radius: 8px; padding: 3px; }
+.view-toggle-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 26px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text-faint); cursor: pointer;
+}
+.view-toggle-btn:hover { color: var(--text-dim); }
+.view-toggle-btn.active { background: var(--panel); color: var(--accent); }
+
+.list-mod-row {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 14px; cursor: pointer;
+}
+.list-mod-row:hover { border-color: var(--accent-dim); }
+.list-mod-row.has-issue { border-color: var(--warn); background: linear-gradient(var(--warn-glow), var(--warn-glow)), var(--panel); }
+/* A broken/unmanaged mod folder (backend/broken_mods.py's 'unpacked_script'
+   reason) — same treatment as .has-issue but red instead of orange, since
+   this isn't merely a suspected conflict, it's confirmed non-functional. */
+.list-mod-row.is-broken { border-color: var(--danger); background: linear-gradient(var(--danger-glow), var(--danger-glow)), var(--panel); cursor: default; }
+/* Grayscale on top of the existing dimming — opacity alone still let
+   accent-colored bits (badges, gems, the active-toggle pill) read as
+   normal colors at 60%, which didn't look distinctly "off" at a glance in
+   list view the way the grid card's own grayscale thumb filter already
+   does. */
+.list-mod-row.is-inactive { opacity: 0.6; filter: grayscale(0.7); }
+.list-mod-row.is-inactive .info h3 { text-decoration: line-through; }
+.list-mod-row .avatar {
+  width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0;
+  background: linear-gradient(135deg, #22403A, #16302B);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-weight: 700; font-size: 13px; color: rgba(255,255,255,0.25);
+  text-align: center; line-height: 1.1; overflow-wrap: anywhere; padding: 0 2px;
+}
+.list-mod-row .avatar.long { font-size: 9px; }
+.list-mod-row .info { flex: 1; min-width: 0; }
+.list-mod-row .info h3 {
+  font-family: var(--font-display); font-size: 14px; margin: 0 0 3px; font-weight: 600;
+  display: flex; align-items: baseline; gap: 8px; overflow-wrap: anywhere;
+}
+.list-mod-row .info h3 .author { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); font-weight: 400; white-space: nowrap; }
+.list-mod-row .info p { font-size: 12px; color: var(--text-dim); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list-mod-row-badges { display: flex; gap: 6px; flex-shrink: 0; }
 
 .card {
   background: var(--panel);
@@ -246,45 +350,89 @@ body {
   overflow: hidden;
   cursor: pointer;
   transition: transform .14s ease, border-color .14s ease;
+  /* Square tiles: height is derived from width, not content — .thumb uses a
+     flex-basis percentage (not a fixed px height) and .card-body shrinks to
+     the remainder via flex:1/min-height:0, so both scale together with
+     whatever square size the grid column ends up giving this card, instead
+     of the fixed-height thumb + intrinsic-height body this used to be. */
+  aspect-ratio: 1 / 1;
+  display: flex; flex-direction: column;
 }
 .card:hover { transform: translateY(-2px); border-color: var(--accent-dim); }
+.card.has-issue { border-color: var(--warn); background: linear-gradient(var(--warn-glow), var(--warn-glow)), var(--panel); }
+.card.has-issue:hover { border-color: var(--warn); }
+/* A broken/unmanaged mod folder — same idea as .has-issue but red instead
+   of orange (confirmed non-functional, not merely a suspected conflict),
+   and not clickable (there's no detail panel behind it). */
+.card.is-broken { border-color: var(--danger); background: linear-gradient(var(--danger-glow), var(--danger-glow)), var(--panel); cursor: default; }
+.card.is-broken:hover { border-color: var(--danger); transform: none; }
 .thumb {
-  height: 118px;
+  flex: 0 0 38%;
   background: linear-gradient(135deg, #22403A, #16302B);
   position: relative;
   display: flex; align-items: center; justify-content: center;
 }
-.thumb .initial { font-family: var(--font-display); font-size: 28px; font-weight: 700; color: rgba(255,255,255,0.15); }
-.compat-badge {
-  position: absolute; top: 9px; right: 9px;
+.thumb .initial {
+  font-family: var(--font-display); font-size: 28px; font-weight: 700; color: rgba(255,255,255,0.15);
+  text-align: center; padding: 0 10px; overflow-wrap: anywhere;
+}
+.thumb .initial.long { font-size: 15px; }
+.icon-btn.repair-icon-btn { color: var(--danger); }
+.icon-btn.repair-icon-btn:hover { background: var(--danger-glow); }
+/* Every classification pill a card can carry (type, duplicate, broken,
+   version, compat, disabled) lives in this one row, overlaid on the fixed-
+   height thumbnail so its content never affects the card's own height —
+   see buildBadges() in app.js. Mirrors .list-mod-row-badges in the list
+   view, which already put everything in one place. */
+.card-badges { position: absolute; bottom: 9px; left: 9px; right: 9px; display: flex; flex-wrap: wrap; gap: 4px; }
+.cc-badge {
   display: flex; align-items: center; gap: 5px;
   background: rgba(17,26,27,0.75);
-  backdrop-filter: blur(4px);
-  padding: 4px 8px 4px 6px;
-  border-radius: 100px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-dim);
-}
-.disabled-tag {
-  position: absolute; top: 9px; left: 9px;
-  background: rgba(17,26,27,0.75);
   font-size: 10px; font-family: var(--font-mono);
-  padding: 3px 7px; border-radius: 5px; color: var(--text-faint);
+  padding: 3px 7px; border-radius: 5px; color: var(--text-dim);
 }
+.cc-badge.warn-badge { background: var(--warn-glow); color: var(--warn); }
+.cc-badge.danger-badge { background: var(--danger-glow); color: var(--danger); font-weight: 700; }
+.pill.warn-pill { background: var(--warn-glow); color: var(--warn); border-color: rgba(255,106,71,0.35); }
+.pill.danger-pill { background: var(--danger-glow); color: var(--danger); border-color: rgba(255,59,59,0.35); font-weight: 700; }
 .card.is-inactive .thumb { filter: grayscale(0.6) brightness(0.7); }
 .card.is-inactive .card-body { opacity: 0.55; }
+.card.is-inactive .card-body h3 { text-decoration: line-through; }
 
-.card-body { padding: 12px 14px 14px; }
-.card-body h3 { font-family: var(--font-display); font-size: 14.5px; margin: 0 0 4px; font-weight: 600; }
-.card-body p { font-size: 12px; color: var(--text-dim); margin: 0 0 10px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card-meta { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+.card-body { padding: 12px 14px 14px; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Line-clamped just like the description below it: with both bounded to a
+   fixed max number of lines, every card's natural height is identical
+   regardless of name/description length, so cards line up even across grid
+   rows (not just within one) without any JS measurement. */
+.card-body h3 {
+  font-family: var(--font-display); font-size: 14.5px; margin: 0 0 4px; font-weight: 600; overflow-wrap: anywhere;
+  line-height: 1.3; min-height: 2.6em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* min-height alongside line-clamp: line-clamp only caps the *max* at 2
+   lines, it doesn't reserve that space when the actual text is shorter —
+   without the explicit minimum, a one-line title/description made the
+   whole card shorter than one with a two-line title, defeating the equal-
+   height goal above (grid's default row-stretch only equalizes cards
+   within the same row, not across the whole grid). */
+.card-body p { font-size: 12px; color: var(--text-dim); margin: 0 0 10px; line-height: 1.45; min-height: 2.9em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-meta { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); margin-top: auto; padding-top: 8px; }
+.card-meta-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .toggle {
   width: 30px; height: 17px; background: var(--border); border-radius: 100px; position: relative; cursor: pointer; flex-shrink: 0;
 }
 .toggle::after { content: ''; position: absolute; width: 13px; height: 13px; background: var(--text-dim); border-radius: 50%; top: 2px; left: 2px; transition: all .15s; }
 .toggle.on { background: var(--accent-dim); }
 .toggle.on::after { left: 15px; background: var(--accent); }
+
+.icon-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text-faint); cursor: pointer; flex-shrink: 0;
+  transition: color .12s, background .12s;
+}
+.icon-btn:hover { color: var(--warn); background: var(--warn-glow); }
+.list-mod-row .icon-btn { margin-left: 4px; }
 
 /* ---------- Detail panel ---------- */
 .overlay {
@@ -340,6 +488,23 @@ body {
 
 .translation-suggestions { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .translation-suggestions .dep-row .actions { flex-shrink: 0; }
+
+.conflict-group {
+  padding: 10px 12px; background: var(--panel-raised); border-radius: 8px;
+  margin-bottom: 10px; font-size: 12.5px;
+}
+.conflict-group .kind { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+.conflict-group .summary { color: var(--text-dim); margin: 4px 0 10px; line-height: 1.5; }
+.conflict-group > .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.conflict-sides { display: flex; gap: 8px; flex-wrap: wrap; }
+.conflict-side {
+  flex: 1 1 160px; min-width: 160px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px;
+}
+.conflict-side .name { display: block; font-weight: 600; margin-bottom: 2px; }
+.conflict-side .meta { display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 8px; }
+.conflict-side .actions { display: flex; gap: 6px; }
 .file-row { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); padding: 5px 0; border-bottom: 1px dashed var(--border); }
 
 .crash-report-block { margin-bottom: 22px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
@@ -366,7 +531,6 @@ body {
 }
 .confirm-modal h3 { font-family: var(--font-display); font-size: 16px; margin: 0 0 10px; }
 .confirm-modal p { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 18px; }
-.confirm-modal p[hidden] { display: none; }
 #confirmExtra:not(:empty) { margin-bottom: 18px; display: flex; flex-direction: column; gap: 6px; }
 .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
 

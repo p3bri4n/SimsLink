@@ -8,6 +8,7 @@ const state = {
   mods: [],
   conflicts: [],
   blacklistMatches: [],
+  brokenMods: [],
   conflictsExpanded: false,
   strings: {},
   filterQuery: "",
@@ -16,6 +17,8 @@ const state = {
   lang: "en",
   theme: "dark",
   tileSize: "large",
+  viewMode: "grid",
+  simplifiedNames: true,
   catalogWired: false,
   updatesWired: false,
   crashWired: false,
@@ -48,6 +51,9 @@ function applyStaticI18n() {
   document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
     el.placeholder = t(el.dataset.i18nPlaceholder);
   });
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    el.title = t(el.dataset.i18nTitle);
+  });
 }
 
 function elementWithText(tag, className, text) {
@@ -59,6 +65,134 @@ function elementWithText(tag, className, text) {
 
 function compatKey(status) {
   return status === "compatible" || status === "incompatible" ? status : "unknown";
+}
+
+// primary_type is computed from which file types the mod actually ships
+// (mod_manager.py): 'package', 'script', or 'mixed' (both). A 'mixed' mod
+// gets both badges — it genuinely contains both, not an either/or.
+function primaryTypeBadgeKeys(primaryType) {
+  const keys = [];
+  if (primaryType === "package" || primaryType === "mixed") keys.push("library.cc_badge");
+  if (primaryType === "script" || primaryType === "mixed") keys.push("library.script_badge");
+  return keys;
+}
+
+const DELETE_ICON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+  '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>' +
+  '<path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+
+function buildDeleteIconButton(mod) {
+  const btn = document.createElement("button");
+  btn.className = "icon-btn delete-icon-btn";
+  btn.title = t("library.delete_button_title");
+  btn.innerHTML = DELETE_ICON_SVG;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    confirmDelete(mod);
+  });
+  return btn;
+}
+
+// Broken folders have no enable/disable concept (see confirmDeleteBrokenFolder()'s
+// comment) so this is the one action every broken card/row gets in addition
+// to whichever reason-specific repair button buildBrokenActionButton() offers.
+function buildDeleteBrokenButton(folder) {
+  const btn = document.createElement("button");
+  btn.className = "icon-btn delete-icon-btn";
+  btn.title = t("library.delete_button_title");
+  btn.innerHTML = DELETE_ICON_SVG;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    confirmDeleteBrokenFolder(folder);
+  });
+  return btn;
+}
+
+const BROKEN_ICON_SVG =
+  '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' +
+  '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>' +
+  '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
+const REPAIR_ICON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+  '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+
+// A broken folder's action button dispatches on `reason`: 'unpacked_script'
+// gets the best-effort re-zip attempt (attempt-script-repair), while
+// 'unextracted_archive' reuses the existing safe auto-fix (fix_broken_mod's
+// single-zip extraction, same route/confirm flow as the warnings banner's
+// own "Fix" button) — there's no third case here, 'empty'/'unrecognized'
+// don't get a card at all (see visibleBrokenModFolders()). Returns null
+// when no action is safe to offer (an ambiguous multi-zip archive) so the
+// card still appears — flagged as a problem — just without a button that
+// would be guaranteed to fail.
+function buildBrokenActionButton(folder) {
+  if (folder.reason === "unpacked_script") {
+    const btn = document.createElement("button");
+    btn.className = "icon-btn repair-icon-btn";
+    btn.title = t("library.broken_repair_button_title");
+    btn.innerHTML = REPAIR_ICON_SVG;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      confirmScriptRepair(folder);
+    });
+    return btn;
+  }
+  if (folder.reason === "unextracted_archive" && folder.zip_names.length === 1) {
+    const btn = document.createElement("button");
+    btn.className = "icon-btn repair-icon-btn";
+    btn.title = t("library.conflicts.broken_mod_fix_button");
+    btn.innerHTML = REPAIR_ICON_SVG;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      confirmFixBrokenMod(folder);
+    });
+    return btn;
+  }
+  return null;
+}
+
+function confirmScriptRepair(folder) {
+  openConfirmModal({
+    title: t("library.broken_repair_confirm.title"),
+    message: t("library.broken_repair_confirm.message", { name: folder.name }),
+    confirmLabel: t("library.broken_repair_confirm.confirm"),
+    onConfirm: () => doAttemptScriptRepair(folder.name),
+  });
+}
+
+async function doAttemptScriptRepair(name) {
+  try {
+    await apiRequest(`/api/mods/broken/${encodeURIComponent(name)}/attempt-script-repair`, { method: "POST" });
+    closeConfirm();
+    await loadMods();
+    render();
+  } catch (err) {
+    showError("errorBanner", t("library.action_error", { error: err.message }));
+  }
+}
+
+// Not a real installed mod — no detail panel to open, only the repair
+// action makes sense here. Filtered by the same search query as real mods
+// for consistency. 'empty'/'unrecognized' stay banner-only (see
+// renderWarnings()): there's nothing to repair for the former and no
+// confident diagnosis for the latter, so a red "problem" card would just
+// be misleading noise.
+function visibleBrokenModFolders() {
+  const query = state.filterQuery.trim().toLowerCase();
+  const candidates = state.brokenMods.filter(
+    (folder) => folder.reason === "unpacked_script" || folder.reason === "unextracted_archive"
+  );
+  return query ? candidates.filter((folder) => folder.name.toLowerCase().includes(query)) : candidates;
+}
+
+function showCompatBadge() {
+  // compat_status is only ever meaningful with CurseForge metadata
+  // (game_version_min/max) — in Assisted Mode every mod is stuck at
+  // 'unknown', so the badge would just repeat the same non-information on
+  // every single card.
+  return !!(state.status && state.status.direct_mode);
 }
 
 function compatGemClass(status) {
@@ -74,6 +208,167 @@ function initials(name) {
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join("");
+}
+
+// Display-only: many mod names lead with a "[SS]"/"(AstroBluu)"-style author
+// or series tag. Pulling it out shortens the name shown on cards/rows and
+// gives the tile avatar something more meaningful than the first letters of
+// "[SS]" itself — never touches mod.name/the stored data, purely rendering.
+function splitNamePrefix(name) {
+  const match = /^[[(]([^\])]+)[\])]\s*(.*)$/.exec(name || "");
+  if (!match || !match[2].trim()) return { prefix: null, rest: name };
+  return { prefix: match[1].trim(), rest: match[2].trim() };
+}
+
+// Display-only: many mod names bake an explicit version number in as a
+// trailing suffix ("_v6.9.4", "_2.6.1", "V1.7", "xxx v1.051", "xxx v4",
+// "xxx - v7.0.0"). Pulling it out keeps the shown name focused on the
+// mod's actual title and gives a real version to display even in Assisted
+// Mode, which has no CurseForge `installed_version` metadata. A trailing
+// "(1)"/"(2)" duplicate-copy marker (the same signal conflict_detector.py's
+// folder_duplication looks for) doesn't count against "at the end" — the
+// version is still detected right before it, and the marker itself is kept
+// in the displayed name since it's a meaningful duplicate signal on its
+// own, not noise to hide. Never touches mod.name — purely rendering.
+const VERSION_SUFFIX_RE =
+  /^(.*?)[\s_]*(?:[-–]\s*)?[vV]\.?\s*(\d+(?:\.\d+){0,3})$|^(.*?)[\s_-]+(\d+(?:\.\d+){1,3})$/;
+
+function splitNameVersion(name) {
+  const trimmed = (name || "").trim();
+  const dupMatch = /^(.*?)(\s*\(\d+\))$/.exec(trimmed);
+  const dupSuffix = dupMatch ? dupMatch[2].trim() : "";
+  const withoutDup = dupMatch ? dupMatch[1] : trimmed;
+
+  const match = VERSION_SUFFIX_RE.exec(withoutDup);
+  if (!match) return { displayName: name, version: null };
+
+  const rest = (match[1] !== undefined ? match[1] : match[3]).trim();
+  const version = match[1] !== undefined ? match[2] : match[4];
+  if (!rest) return { displayName: name, version: null };
+
+  return { displayName: dupSuffix ? `${rest} ${dupSuffix}` : rest, version };
+}
+
+// Best-effort fallback for mods with neither a real `author` (no CurseForge
+// metadata in Assisted Mode) nor a "[XX]"/"(XX)" name prefix: many mod
+// series share a leading word-sequence (e.g. "adeepindigo_gameplaymods_...",
+// "LIN-DIAN 20230530_HAIR SET" / "LIN-DIAN 20230910_Crocs_Set", "Slice of
+// Life ... Beauty Features PL" / "Slice of Life ... Fun Juice Features PL").
+// Splitting only on the *first* delimiter would cut "LIN-DIAN" in half at
+// its internal hyphen, and would never notice a multi-word series name like
+// "Slice of Life" — so instead this clusters on the longest run of leading
+// word-segments (split on underscore/whitespace only; a hyphen stays part of
+// its segment, e.g. "LIN-DIAN" is one segment) shared by 2+ mods, trying 4
+// segments down to 1 and greedily removing whatever already matched at a
+// longer length before trying shorter ones. Never written back as
+// mod.author; purely a rendering/grouping aid.
+const MAX_INFERRED_PREFIX_SEGMENTS = 4;
+const MIN_INFERRED_PREFIX_CHARS = 3;
+
+function nameSegments(name) {
+  return (name || "").trim().split(/[_\s]+/).filter(Boolean);
+}
+
+// Everything after the k-th run of underscores/whitespace in `name` — finds
+// the same split point nameSegments() would have used for that mod's own
+// text, rather than assuming every mod in a cluster used identical
+// delimiters (one might use a space where another used an underscore).
+function sliceAfterSegments(name, k) {
+  const trimmed = (name || "").trim();
+  const re = /[_\s]+/g;
+  let count = 0;
+  let match;
+  while ((match = re.exec(trimmed)) !== null) {
+    count += 1;
+    if (count === k) return trimmed.slice(match.index + match[0].length).trim();
+  }
+  return "";
+}
+
+// mod.name with any trailing version suffix already stripped (see
+// splitNameVersion below) — computed once and threaded through the
+// author/prefix clustering that follows, so a version number never gets
+// mistaken for (or absorbed into) a shared segment. Without this, two mods
+// differing only by version (e.g. "CoolHairSet_v6.9.4" and
+// "CoolHairSet_v6.9.4(1)") would cluster on "CoolHairSet" as if it were a
+// shared author/series prefix, leaving nothing but the version number
+// itself as the displayed name.
+function baseName(mod) {
+  return splitNameVersion(mod.name).displayName;
+}
+
+function computeInferredAuthorTags(mods) {
+  const candidates = mods.filter((mod) => !(mod.author || "").trim() && !splitNamePrefix(baseName(mod)).prefix);
+  const segmentsById = new Map(candidates.map((mod) => [mod.id, nameSegments(baseName(mod))]));
+
+  // groupsByK[k - 1] = lowercase-prefix -> { display, ids } for that segment count.
+  const groupsByK = [];
+  for (let k = 1; k <= MAX_INFERRED_PREFIX_SEGMENTS; k++) {
+    const groups = new Map();
+    candidates.forEach((mod) => {
+      const segments = segmentsById.get(mod.id);
+      if (segments.length <= k) return; // nothing would be left of the name after stripping
+      const display = segments.slice(0, k).join(" ");
+      if (display.replace(/\s+/g, "").length < MIN_INFERRED_PREFIX_CHARS) return;
+      const key = display.toLowerCase();
+      if (!groups.has(key)) groups.set(key, { display, ids: [] });
+      groups.get(key).ids.push(mod.id);
+    });
+    groupsByK.push(groups);
+  }
+
+  // Per mod, pick whichever segment count covers the *largest* number of
+  // mods — not the longest matching prefix. A short, shared brand tag
+  // ("adeepindigo", 14 mods) should win over a longer but narrower
+  // sub-family match ("adeepindigo gameplaymods", 8 mods) that would
+  // otherwise needlessly fragment one author into several headers. Ties
+  // (same coverage at more than one length, e.g. an author whose every mod
+  // happens to share a longer common run too) prefer the longer, more
+  // descriptive prefix — later, larger k values overwrite on a tie below.
+  const tags = new Map();
+  candidates.forEach((mod) => {
+    const segments = segmentsById.get(mod.id);
+    let best = null;
+    for (let k = 1; k <= MAX_INFERRED_PREFIX_SEGMENTS && segments.length > k; k++) {
+      const key = segments.slice(0, k).join(" ").toLowerCase();
+      const group = groupsByK[k - 1].get(key);
+      if (!group || group.ids.length < 2) continue;
+      if (!best || group.ids.length >= best.size) best = { display: group.display, size: group.ids.length, k };
+    }
+    if (best) tags.set(mod.id, { display: best.display, segmentCount: best.k });
+  });
+  return tags;
+}
+
+// The single label used for sorting, the group header, and the tile
+// abbreviation: a confirmed author always wins, then a "[XX]" name prefix,
+// then the inferred fallback above. `inferredTags` is computed once per
+// render() over the whole visible set (clustering needs to see all mods at
+// once). `displayName` is `mod.name` with whichever prefix was used to
+// derive `label` stripped off — never done for a confirmed `mod.author`,
+// since that's separate metadata, not text embedded in the name.
+function groupingAuthor(mod, inferredTags) {
+  const { displayName: base, version } = splitNameVersion(mod.name);
+  const author = (mod.author || "").trim();
+  if (author) return { label: author, displayName: base, version };
+  const { prefix, rest } = splitNamePrefix(base);
+  if (prefix) return { label: prefix, displayName: rest, version };
+  const inferred = inferredTags.get(mod.id);
+  if (inferred) {
+    const stripped = sliceAfterSegments(base, inferred.segmentCount);
+    return { label: inferred.display, displayName: stripped || base, version };
+  }
+  return { label: "", displayName: base, version };
+}
+
+// Toggled by the "Simplified names" checkbox next to the view switch —
+// affects only the title text shown on a card/row. Grouping (author
+// headers, sort order, the avatar label) and the version badge stay driven
+// by groupingAuthor() either way, since those aren't "the mod's name" as
+// far as this toggle is concerned, just organizational metadata derived
+// from it.
+function titleText(mod, displayName) {
+  return state.simplifiedNames ? displayName : mod.name;
 }
 
 function showError(bannerId, message) {
@@ -120,19 +415,28 @@ function renderStatus() {
 
   document.getElementById("footVersion").textContent =
     `v${status.app_version} · GAME ${status.game_version || "—"}`;
+
+  // Catalog has genuinely nothing to show without a CurseForge key (just an
+  // empty notice) — hide its nav entry entirely rather than link to an
+  // empty view. Updates keeps its nav entry: its manual checklist (linked
+  // mods + "Check on CurseForge" links) still has real content in Assisted
+  // Mode, unlike Catalog.
+  document.querySelector('.nav-item[data-view="catalog"]').hidden = !status.direct_mode;
 }
 
 // --- mod list / grid ----------------------------------------------------------
 
 async function loadMods() {
-  const [mods, conflicts, blacklistMatches] = await Promise.all([
+  const [mods, conflicts, blacklistMatches, brokenMods] = await Promise.all([
     apiRequest("/api/mods"),
     apiRequest("/api/conflicts"),
     apiRequest("/api/blacklist/matches"),
+    apiRequest("/api/mods/broken"),
   ]);
   state.mods = mods;
   state.conflicts = conflicts;
   state.blacklistMatches = blacklistMatches;
+  state.brokenMods = brokenMods;
 }
 
 function visibleMods() {
@@ -150,9 +454,24 @@ function renderWarnings() {
     state.status && state.status.script_mods_allowed === false
   );
 
+  // Real conflicts (duplicate files, script collisions, folder duplication,
+  // blacklist matches) used to also list here, but every one of them is
+  // already surfaced on the mod's own card/row (red border, "Duplicate" tag)
+  // and expanded in its detail panel — repeating them here was redundant
+  // now that that visual treatment exists. Unmanaged broken mod folders
+  // (broken_mods.py) mostly stay here: they have no card at all to attach a
+  // highlight to, since they were never actually installed. 'unpacked_script'
+  // and 'unextracted_archive' are the exceptions — both get their own red
+  // pseudo-mod card in the grid (see visibleBrokenModFolders(),
+  // brokenFolderPseudoMod()/buildCard()) since a repair action makes sense
+  // to attach to them, so they're excluded here to avoid saying the same
+  // thing twice. 'empty'/'unrecognized' stay banner-only.
   const banner = document.getElementById("conflictsBanner");
   const list = document.getElementById("conflictsList");
-  const totalCount = state.conflicts.length + state.blacklistMatches.length;
+  const bannerFolders = state.brokenMods.filter(
+    (folder) => folder.reason !== "unpacked_script" && folder.reason !== "unextracted_archive"
+  );
+  const totalCount = bannerFolders.length;
 
   if (!totalCount) {
     banner.hidden = true;
@@ -166,33 +485,130 @@ function renderWarnings() {
 
   list.hidden = !state.conflictsExpanded;
   list.innerHTML = "";
-  state.conflicts.forEach((group) => {
-    const names = group.mods.map((m) => m.name).join(", ");
+  bannerFolders.forEach((folder) => {
     const row = document.createElement("div");
     row.className = "conflict-row";
     const kindLabel = document.createElement("span");
     kindLabel.className = "kind";
-    kindLabel.textContent = t(`library.conflicts.${group.kind}`);
+    kindLabel.textContent = t(`library.conflicts.broken_mod_${folder.reason}`);
     row.appendChild(kindLabel);
+    const filesList =
+      folder.sample_files.join(", ") + (folder.file_count > folder.sample_files.length ? ", …" : "");
     row.append(
-      group.kind === "ts4script_name_collision"
-        ? t("library.conflicts.ts4script_name_collision_line", { names, filename: group.identifier })
-        : t("library.conflicts.duplicate_package_line", { names })
+      t(`library.conflicts.broken_mod_${folder.reason}_line`, {
+        name: folder.name,
+        zips: folder.zip_names.join(", "),
+        files: filesList,
+      })
     );
+    if (folder.reason === "empty") {
+      const fixBtn = document.createElement("button");
+      fixBtn.className = "btn btn-sm";
+      fixBtn.textContent = t("library.conflicts.broken_mod_fix_button");
+      fixBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        confirmFixBrokenMod(folder);
+      });
+      row.appendChild(fixBtn);
+    }
     list.appendChild(row);
   });
-  state.blacklistMatches.forEach((match) => {
-    const row = document.createElement("div");
-    row.className = "conflict-row";
-    const kindLabel = document.createElement("span");
-    kindLabel.className = "kind";
-    kindLabel.textContent = t("library.conflicts.blacklist_match");
-    row.appendChild(kindLabel);
-    row.append(
-      t("library.conflicts.blacklist_match_line", { name: match.mod_name, patterns: match.patterns.join(", ") })
-    );
-    list.appendChild(row);
-  });
+}
+
+function problemModIds() {
+  // Mods already installed and flagged by conflict_detector.py or
+  // blacklist.py — surfaced as a red highlight directly on their card, in
+  // addition to the detailed collapsible list above. Unmanaged broken mod
+  // folders (broken_mods.py) are a separate, higher-priority tier — see
+  // modTier() — since "confirmed non-functional" outranks "suspected".
+  const ids = new Set();
+  state.conflicts.forEach((group) => group.mods.forEach((m) => ids.add(m.id)));
+  state.blacklistMatches.forEach((match) => ids.add(match.mod_id));
+  return ids;
+}
+
+// Sort priority within an author group (or the trailing authorless
+// bucket): 0 = broken folder (confirmed non-functional), 1 = problem mod
+// (conflict/blacklist flagged, only ever active — conflict_detector.py
+// doesn't consider disabled mods), 2 = normal active mod, 3 = disabled.
+function modTier(mod, problems) {
+  if (mod.__brokenFolder) return 0;
+  if (!mod.active) return 3;
+  if (problems.has(mod.id)) return 1;
+  return 2;
+}
+
+// Within a folder_duplication conflict (backend/conflict_detector.py), only
+// the "(1)"/"(2)"/... suffixed member(s) get the "Duplicate" tag — the
+// unsuffixed one is presumed the original, the suffixed one(s) the accidental
+// re-download/re-install. An exact_duplicate_mod group (100% shared files,
+// see conflict_detector.py) uses `author` for the same call instead, since
+// there's no name pattern to go on: whichever member has no known author is
+// presumed the redundant one when at least one other member does have one.
+// Purely a display tag, doesn't affect which mod problemModIds() flags (the
+// whole group still gets the red border either way).
+function duplicateTagModIds() {
+  const ids = new Set();
+  state.conflicts
+    .filter((group) => group.kind === "folder_duplication")
+    .forEach((group) => group.mods.forEach((m) => {
+      if (/\(\d+\)\s*$/.test(m.name)) ids.add(m.id);
+    }));
+  state.conflicts
+    .filter((group) => group.kind === "exact_duplicate_mod")
+    .forEach((group) => {
+      const authored = group.mods.filter((m) => m.author);
+      const unauthored = group.mods.filter((m) => !m.author);
+      if (authored.length && unauthored.length) {
+        unauthored.forEach((m) => ids.add(m.id));
+      }
+    });
+  return ids;
+}
+
+// The other half of an exact_duplicate_mod group's tagging: when there's no
+// known-vs-unknown author split to blame one side with (nobody has an
+// author, or everybody does — same author or different ones), neither
+// member is singled out as "the duplicate". They still get flagged as
+// identical to each other, just without an accusation — picking a side with
+// no real basis (e.g. by install date) risks wrongly implying one author's
+// mod is a rip-off of another's.
+function identicalContentTagModIds() {
+  const ids = new Set();
+  state.conflicts
+    .filter((group) => group.kind === "exact_duplicate_mod")
+    .forEach((group) => {
+      const authored = group.mods.filter((m) => m.author);
+      const unauthored = group.mods.filter((m) => !m.author);
+      if (!(authored.length && unauthored.length)) {
+        group.mods.forEach((m) => ids.add(m.id));
+      }
+    });
+  return ids;
+}
+
+// An unmanaged broken folder (broken_mods.py's 'unpacked_script' or
+// 'unextracted_archive' reasons — see visibleBrokenModFolders()) is
+// rendered as a pseudo-mod so it goes through the exact same placement,
+// author-namespace, and version-extraction logic as a real installed mod
+// (see the caller's request: it shouldn't get special-cased top-of-grid
+// treatment anymore). buildCard()/buildListRow() key off `__brokenFolder`
+// to swap in the broken icon/red theme and the repair action instead of
+// toggle/delete — everything else (thumb, badges row, meta row) is shared
+// scaffolding so its card is indistinguishable in size/layout from a real
+// one, which is what keeps every card the same height.
+function brokenFolderPseudoMod(folder) {
+  return {
+    id: `broken:${folder.name}`,
+    name: folder.name,
+    author: null,
+    active: true,
+    primary_type: null,
+    installed_version: null,
+    compat_status: "unknown",
+    short_description: t(`library.conflicts.broken_mod_${folder.reason}`),
+    __brokenFolder: folder,
+  };
 }
 
 function render() {
@@ -205,52 +621,218 @@ function render() {
 
   const grid = document.getElementById("grid");
   grid.innerHTML = "";
-  const mods = visibleMods();
+
+  const problems = problemModIds();
+  const duplicateTags = duplicateTagModIds();
+  const identicalContentTags = identicalContentTagModIds();
+  const brokenPseudos = visibleBrokenModFolders().map(brokenFolderPseudoMod);
+  const visible = visibleMods().concat(brokenPseudos);
+  const inferredTags = computeInferredAuthorTags(visible);
+  // Author is the primary key — a problem mod shares its author's group
+  // rather than being pulled out into a separate top-of-page section. Mods
+  // with no author at all sort after ones that have one, rather than
+  // clumping arbitrarily at the top under an empty "author". Within a
+  // group (or the trailing authorless bucket), four distinct tiers, in
+  // this order: broken folders, then problem mods (conflict/blacklist
+  // flagged), then normal active mods, then disabled ones — broken and
+  // problem are NOT the same tier (a broken folder is confirmed
+  // non-functional, a problem mod only suspected), and a disabled mod is
+  // never itself a "problem" (conflict_detector.py only considers active
+  // mods) but still needs its own tier below normal, not just "not a
+  // problem". Alphabetical is the final tiebreak within a tier.
+  const mods = visible.slice().sort((a, b) => {
+    const authorA = groupingAuthor(a, inferredTags).label;
+    const authorB = groupingAuthor(b, inferredTags).label;
+    if (!authorA !== !authorB) return authorA ? -1 : 1;
+    const authorDiff = authorA.localeCompare(authorB, undefined, { sensitivity: "base" });
+    if (authorDiff !== 0) return authorDiff;
+    const tierDiff = modTier(a, problems) - modTier(b, problems);
+    if (tierDiff !== 0) return tierDiff;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
   if (!mods.length) {
     grid.appendChild(elementWithText("div", "empty-state", t("library.empty")));
     return;
   }
-  mods.forEach((mod) => grid.appendChild(buildCard(mod)));
+  const buildFn = state.viewMode === "list" ? buildListRow : buildCard;
+  // Author is now the sole top-level sort key, so each author's mods are
+  // always contiguous — a header only needs to check "did the author
+  // change since the last mod", no reset-on-authorless-mod needed. Mods
+  // with no author at all (no real `mod.author`, no bracket prefix, no
+  // inferred series match) already sort last (see the comparator above);
+  // they still get a header of their own — a generic "Unknown author" one
+  // — instead of running headerless off the end of the previous group.
+  let lastHeaderAuthor = null;
+  mods.forEach((mod) => {
+    const { label: author } = groupingAuthor(mod, inferredTags);
+    if (author !== lastHeaderAuthor) {
+      grid.appendChild(buildAuthorHeader(author || t("library.unknown_author_header")));
+    }
+    lastHeaderAuthor = author;
+    grid.appendChild(
+      buildFn(mod, inferredTags, problems.has(mod.id), duplicateTags.has(mod.id), identicalContentTags.has(mod.id))
+    );
+  });
 }
 
-function buildCard(mod) {
+function buildAuthorHeader(author) {
+  const header = document.createElement("div");
+  header.className = "author-group-header";
+  header.appendChild(elementWithText("span", null, author));
+  const rule = document.createElement("div");
+  rule.className = "rule";
+  header.appendChild(rule);
+  return header;
+}
+
+// Normalizes a version string for display: "6.9.4" -> "v6.9.4", but
+// "v1.7"/"V1.7" (either extracted from a name that already had one, or a
+// CurseForge `installed_version` that already includes one) is left as-is
+// rather than becoming "vv1.7".
+function formatVersionBadge(rawVersion) {
+  return /^v/i.test(rawVersion) ? rawVersion : `v${rawVersion}`;
+}
+
+// Every classification pill a mod/broken-folder can carry — duplicate,
+// broken, type (CC/Script), version, compat, disabled — lives in one single
+// row (`badgeClassName`/`gemSizePx` let the caller pick the pill vs.
+// cc-badge styling and gem size, since the grid card and list row use
+// different components for otherwise the exact same set of badges). Shared
+// by buildCard()/buildListRow() so "all badges in the same place" holds in
+// both views.
+function buildBadges(mod, version, isDuplicate, isIdenticalContent, badgeClassName, gemSizePx) {
+  const broken = mod.__brokenFolder;
+  const badges = document.createElement("span"); // caller decides tag/class via appendChild target
+  const items = [];
+  if (broken) {
+    items.push(elementWithText("span", `${badgeClassName} danger-badge`, t("library.broken_tag")));
+  }
+  if (isDuplicate) {
+    items.push(elementWithText("span", `${badgeClassName} warn-badge`, t("library.duplicate_tag")));
+  } else if (isIdenticalContent) {
+    items.push(elementWithText("span", badgeClassName, t("library.identical_content_tag")));
+  }
+  const rowVersion = mod.installed_version || version;
+  if (rowVersion) {
+    items.push(elementWithText("span", badgeClassName, formatVersionBadge(rowVersion)));
+  }
+  primaryTypeBadgeKeys(mod.primary_type).forEach((key) => items.push(elementWithText("span", badgeClassName, t(key))));
+  if (!broken && showCompatBadge()) {
+    const compat = document.createElement("span");
+    compat.className = badgeClassName;
+    const gem = document.createElement("span");
+    gem.className = "gem" + (compatGemClass(mod.compat_status) ? " " + compatGemClass(mod.compat_status) : "");
+    gem.style.width = gemSizePx;
+    gem.style.height = gemSizePx;
+    compat.appendChild(gem);
+    compat.append(" " + t(`library.compat.${compatKey(mod.compat_status)}`));
+    items.push(compat);
+  }
+  if (!broken && !mod.active) {
+    items.push(elementWithText("span", badgeClassName, t("library.disabled_tag")));
+  }
+  items.forEach((item) => badges.appendChild(item));
+  return { el: badges, count: items.length };
+}
+
+function buildListRow(mod, inferredTags, hasIssue, isDuplicate, isIdenticalContent) {
+  const { label, displayName, version } = groupingAuthor(mod, inferredTags);
+  const broken = mod.__brokenFolder;
+  const row = document.createElement("div");
+  row.className = "list-mod-row" + (mod.active ? "" : " is-inactive") + (broken ? " is-broken" : hasIssue ? " has-issue" : "");
+  if (!broken) row.addEventListener("click", () => openDetail(mod.id));
+
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  if (broken) {
+    avatar.innerHTML = BROKEN_ICON_SVG;
+  } else {
+    avatar.textContent = label || initials(mod.name);
+    if (label && label.length > 4) avatar.classList.add("long");
+  }
+  row.appendChild(avatar);
+
+  const info = document.createElement("div");
+  info.className = "info";
+  const h3 = document.createElement("h3");
+  h3.appendChild(document.createTextNode(titleText(mod, displayName)));
+  if (mod.author) h3.appendChild(elementWithText("span", "author", mod.author));
+  info.appendChild(h3);
+  info.appendChild(elementWithText("p", null, mod.short_description || ""));
+  row.appendChild(info);
+
+  const badges = buildBadges(mod, version, isDuplicate, isIdenticalContent, "pill", "7px").el;
+  badges.className = "list-mod-row-badges";
+  row.appendChild(badges);
+
+  if (broken) {
+    const actionBtn = buildBrokenActionButton(mod.__brokenFolder);
+    if (actionBtn) row.appendChild(actionBtn);
+    row.appendChild(buildDeleteBrokenButton(mod.__brokenFolder));
+  } else {
+    const toggle = document.createElement("span");
+    toggle.className = "toggle" + (mod.active ? " on" : "");
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleActive(mod);
+    });
+    row.appendChild(toggle);
+    row.appendChild(buildDeleteIconButton(mod));
+  }
+
+  return row;
+}
+
+function buildCard(mod, inferredTags, hasIssue, isDuplicate, isIdenticalContent) {
+  const { label, displayName, version } = groupingAuthor(mod, inferredTags);
+  const broken = mod.__brokenFolder;
   const card = document.createElement("div");
-  card.className = "card" + (mod.active ? "" : " is-inactive");
-  card.addEventListener("click", () => openDetail(mod.id));
+  card.className = "card" + (mod.active ? "" : " is-inactive") + (broken ? " is-broken" : hasIssue ? " has-issue" : "");
+  if (!broken) card.addEventListener("click", () => openDetail(mod.id));
 
   const thumb = document.createElement("div");
   thumb.className = "thumb";
-  thumb.appendChild(elementWithText("span", "initial", initials(mod.name)));
-
-  if (!mod.active) {
-    thumb.appendChild(elementWithText("span", "disabled-tag", t("library.disabled_tag")));
+  const initialEl = document.createElement("span");
+  initialEl.className = "initial";
+  if (broken) {
+    initialEl.innerHTML = BROKEN_ICON_SVG;
+  } else {
+    initialEl.textContent = label || initials(mod.name);
+    if (label && label.length > 4) initialEl.classList.add("long");
   }
+  thumb.appendChild(initialEl);
 
-  const badge = document.createElement("span");
-  badge.className = "compat-badge";
-  const badgeGem = document.createElement("span");
-  badgeGem.className = "gem" + (compatGemClass(mod.compat_status) ? " " + compatGemClass(mod.compat_status) : "");
-  badgeGem.style.width = "8px";
-  badgeGem.style.height = "8px";
-  badge.appendChild(badgeGem);
-  badge.append(" " + t(`library.compat.${compatKey(mod.compat_status)}`));
-  thumb.appendChild(badge);
+  const badges = buildBadges(mod, version, isDuplicate, isIdenticalContent, "cc-badge", "8px");
+  if (badges.count) {
+    badges.el.className = "card-badges";
+    thumb.appendChild(badges.el);
+  }
 
   const body = document.createElement("div");
   body.className = "card-body";
-  body.appendChild(elementWithText("h3", null, mod.name));
+  body.appendChild(elementWithText("h3", null, titleText(mod, displayName)));
   body.appendChild(elementWithText("p", null, mod.short_description || ""));
 
   const meta = document.createElement("div");
   meta.className = "card-meta";
-  meta.appendChild(elementWithText("span", null, mod.installed_version || ""));
-  const toggle = document.createElement("span");
-  toggle.className = "toggle" + (mod.active ? " on" : "");
-  toggle.addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleActive(mod);
-  });
-  meta.appendChild(toggle);
+  meta.appendChild(document.createElement("span"));
+  const metaActions = document.createElement("span");
+  metaActions.className = "card-meta-actions";
+  if (broken) {
+    const actionBtn = buildBrokenActionButton(mod.__brokenFolder);
+    if (actionBtn) metaActions.appendChild(actionBtn);
+    metaActions.appendChild(buildDeleteBrokenButton(mod.__brokenFolder));
+  } else {
+    const toggle = document.createElement("span");
+    toggle.className = "toggle" + (mod.active ? " on" : "");
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleActive(mod);
+    });
+    metaActions.appendChild(toggle);
+    metaActions.appendChild(buildDeleteIconButton(mod));
+  }
+  meta.appendChild(metaActions);
   body.appendChild(meta);
 
   card.appendChild(thumb);
@@ -885,6 +1467,42 @@ function applyTileSize(size) {
   localStorage.setItem("simslink-tile-size", size);
 }
 
+function applyViewMode(mode) {
+  state.viewMode = mode;
+  document.getElementById("grid").classList.toggle("grid-list-mode", mode === "list");
+  document.querySelectorAll("#viewToggle .view-toggle-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.viewMode === mode);
+  });
+  localStorage.setItem("simslink-view-mode", mode);
+}
+
+function wireViewToggle() {
+  document.querySelectorAll("#viewToggle .view-toggle-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      applyViewMode(btn.dataset.viewMode);
+      render();
+    });
+  });
+}
+
+// Whether card/row titles show the cleaned-up name (bracket prefix, trailing
+// version, and inferred series prefix all stripped — see groupingAuthor())
+// or the mod's original, untouched name. Purely a display preference, same
+// as theme/tile size — grouping/sorting/the avatar label are unaffected
+// either way, only the title text shown in buildCard()/buildListRow().
+function applySimplifiedNames(enabled) {
+  state.simplifiedNames = enabled;
+  document.getElementById("simplifiedNamesCheckbox").checked = enabled;
+  localStorage.setItem("simslink-simplified-names", enabled ? "1" : "0");
+}
+
+function wireSimplifiedNamesToggle() {
+  document.getElementById("simplifiedNamesCheckbox").addEventListener("change", (e) => {
+    applySimplifiedNames(e.target.checked);
+    render();
+  });
+}
+
 // --- profiles ----------------------------------------------------------------------
 
 async function loadProfiles() {
@@ -1110,18 +1728,23 @@ function renderDetail(mod) {
   });
 
   const statusPill = document.getElementById("dStatus");
-  statusPill.innerHTML = "";
-  const gem = document.createElement("span");
-  gem.className = "gem" + (compatGemClass(mod.compat_status) ? " " + compatGemClass(mod.compat_status) : "");
-  gem.style.width = "7px";
-  gem.style.height = "7px";
-  statusPill.appendChild(gem);
-  statusPill.append(" " + t(`library.compat.${compatKey(mod.compat_status)}`));
+  statusPill.hidden = !showCompatBadge();
+  if (!statusPill.hidden) {
+    statusPill.innerHTML = "";
+    const gem = document.createElement("span");
+    gem.className = "gem" + (compatGemClass(mod.compat_status) ? " " + compatGemClass(mod.compat_status) : "");
+    gem.style.width = "7px";
+    gem.style.height = "7px";
+    statusPill.appendChild(gem);
+    statusPill.append(" " + t(`library.compat.${compatKey(mod.compat_status)}`));
+  }
 
   document.getElementById("dVersion").textContent = mod.installed_version || t("library.unknown");
   document.getElementById("dType").textContent = mod.primary_type || "";
   document.getElementById("dDesc").textContent =
     mod.full_description || mod.short_description || t("library.detail.no_description");
+
+  renderDetailConflicts(mod);
 
   const depContainer = document.getElementById("dDependencies");
   depContainer.innerHTML = "";
@@ -1143,6 +1766,143 @@ function renderDetail(mod) {
   document.getElementById("deleteBtn").onclick = () => confirmDelete(mod);
   document.getElementById("dTranslationSuggestions").innerHTML = "";
   document.getElementById("detectTranslationBtn").onclick = () => doDetectTranslation(mod.id);
+}
+
+function formatInstallDate(isoString) {
+  if (!isoString) return t("library.unknown");
+  const parsed = new Date(isoString);
+  return Number.isNaN(parsed.getTime()) ? t("library.unknown") : parsed.toLocaleDateString();
+}
+
+// A conflict's `mods` entries already carry {id, name, active, install_date}
+// (see GET /api/conflicts) — enough to act on directly, without a full
+// mod-detail fetch. Used for the side-by-side comparison cards below.
+function buildConflictSide(modLite) {
+  const side = document.createElement("div");
+  side.className = "conflict-side";
+  side.appendChild(elementWithText("span", "name", modLite.name));
+  side.appendChild(
+    elementWithText(
+      "span",
+      "meta",
+      t("library.detail.conflict_side_meta", {
+        date: formatInstallDate(modLite.install_date),
+        state: t(modLite.active ? "library.detail.conflict_side_active" : "library.detail.conflict_side_inactive"),
+      })
+    )
+  );
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const toggleBtn = document.createElement("button");
+  toggleBtn.className = "btn btn-sm";
+  toggleBtn.textContent = t(
+    modLite.active ? "library.detail.resolve_disable_button" : "library.detail.resolve_enable_button"
+  );
+  toggleBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await toggleActive(modLite);
+    if (state.currentDetailId) await openDetail(state.currentDetailId);
+  });
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn btn-sm danger";
+  deleteBtn.textContent = t("library.detail.resolve_delete_button");
+  deleteBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    confirmDelete(modLite);
+  });
+  actions.appendChild(toggleBtn);
+  actions.appendChild(deleteBtn);
+  side.appendChild(actions);
+  return side;
+}
+
+function renderDetailConflicts(mod) {
+  // Reuses state.conflicts/state.blacklistMatches already loaded for the
+  // Library grid (see problemModIds()) — openDetail() is only reachable
+  // from there, so both are guaranteed populated. Every mod involved gets
+  // its own comparison card with the facts relevant to "which one do I
+  // keep" (install date, active state) and its own Disable/Delete — never
+  // a recommendation of which side to pick, same "suspicion is not
+  // confirmation" rule as the Library warnings banner this mirrors.
+  const modConflicts = state.conflicts.filter((g) => g.mods.some((m) => m.id === mod.id));
+  const blacklistMatch = state.blacklistMatches.find((m) => m.mod_id === mod.id);
+  const section = document.getElementById("dConflictsSection");
+  const container = document.getElementById("dConflicts");
+  container.innerHTML = "";
+
+  if (!modConflicts.length && !blacklistMatch) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+
+  modConflicts.forEach((group) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "conflict-group";
+    wrapper.appendChild(elementWithText("span", "kind", t(`library.conflicts.${group.kind}`)));
+    wrapper.appendChild(
+      elementWithText(
+        "div",
+        "summary",
+        group.kind === "exact_duplicate_mod"
+          ? t("library.detail.conflict_exact_duplicate_summary", { count: group.file_count })
+          : group.kind === "folder_duplication"
+          ? t("library.detail.conflict_folder_duplication_summary")
+          : group.kind === "ts4script_name_collision"
+          ? t("library.detail.conflict_ts4script_collision_summary", { filename: group.identifier })
+          : t("library.detail.conflict_duplicate_package_summary", { count: group.file_count })
+      )
+    );
+    const sides = document.createElement("div");
+    sides.className = "conflict-sides";
+    group.mods.forEach((modLite) => sides.appendChild(buildConflictSide(modLite)));
+    wrapper.appendChild(sides);
+    container.appendChild(wrapper);
+  });
+
+  if (blacklistMatch) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "conflict-group";
+    wrapper.appendChild(elementWithText("span", "kind", t("library.conflicts.blacklist_match")));
+    wrapper.appendChild(
+      elementWithText(
+        "div",
+        "summary",
+        t("library.detail.conflict_blacklist_line", { patterns: blacklistMatch.patterns.join(", ") })
+      )
+    );
+    const removeActions = document.createElement("div");
+    removeActions.className = "actions";
+    blacklistMatch.pattern_ids.forEach((patternId, i) => {
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "btn btn-sm";
+      removeBtn.textContent = t("library.detail.conflict_blacklist_remove_button", {
+        pattern: blacklistMatch.patterns[i],
+      });
+      removeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        doRemoveBlacklistEntryFromDetail(patternId);
+      });
+      removeActions.appendChild(removeBtn);
+    });
+    const sides = document.createElement("div");
+    sides.className = "conflict-sides";
+    sides.appendChild(buildConflictSide(mod));
+    wrapper.appendChild(removeActions);
+    wrapper.appendChild(sides);
+    container.appendChild(wrapper);
+  }
+}
+
+async function doRemoveBlacklistEntryFromDetail(entryId) {
+  try {
+    await apiRequest(`/api/blacklist/${entryId}`, { method: "DELETE" });
+    await loadMods();
+    render();
+    if (state.currentDetailId) await openDetail(state.currentDetailId);
+  } catch (err) {
+    showError("errorBanner", t("library.action_error", { error: err.message }));
+  }
 }
 
 function buildDependencyRow(dep) {
@@ -1306,13 +2066,65 @@ function confirmDelete(mod) {
   });
 }
 
+function confirmFixBrokenMod(folder) {
+  openConfirmModal({
+    title: t("library.conflicts.broken_mod_fix_confirm.title"),
+    message: t(`library.conflicts.broken_mod_fix_confirm.${folder.reason}_message`, {
+      name: folder.name,
+      zips: folder.zip_names.join(", "),
+    }),
+    confirmLabel: t("library.conflicts.broken_mod_fix_confirm.confirm"),
+    onConfirm: () => doFixBrokenMod(folder.name),
+  });
+}
+
+async function doFixBrokenMod(name) {
+  try {
+    await apiRequest(`/api/mods/broken/${encodeURIComponent(name)}/fix`, { method: "POST" });
+    closeConfirm();
+    await loadMods();
+    render();
+  } catch (err) {
+    showError("errorBanner", t("library.action_error", { error: err.message }));
+  }
+}
+
+// A broken folder has no enable/disable concept — it isn't a managed mod
+// with an active/inactive symlink, and nothing the game would load sits in
+// it anyway (that's the whole reason it's flagged), so unlike a real mod
+// there's no toggle here, only delete.
+function confirmDeleteBrokenFolder(folder) {
+  openConfirmModal({
+    title: t("library.broken_delete_confirm.title"),
+    message: t("library.broken_delete_confirm.message", { name: folder.name }),
+    confirmLabel: t("library.broken_delete_confirm.confirm"),
+    onConfirm: () => doDeleteBrokenFolder(folder.name),
+  });
+}
+
+async function doDeleteBrokenFolder(name) {
+  try {
+    await apiRequest(`/api/mods/broken/${encodeURIComponent(name)}`, { method: "DELETE" });
+    closeConfirm();
+    await loadMods();
+    render();
+  } catch (err) {
+    showError("errorBanner", t("library.action_error", { error: err.message }));
+  }
+}
+
 async function doDelete(modId) {
   try {
     await apiRequest(`/api/mods/${encodeURIComponent(modId)}`, { method: "DELETE" });
     closeConfirm();
-    closeDetail();
+    // Deleting the *other* side of a conflict comparison from within the
+    // currently open mod's detail panel shouldn't kick the user out of it —
+    // only close when the deleted mod is the one actually being viewed.
+    const wasCurrentDetail = state.currentDetailId === modId;
+    if (wasCurrentDetail) closeDetail();
     await loadMods();
     render();
+    if (!wasCurrentDetail && state.currentDetailId) await openDetail(state.currentDetailId);
   } catch (err) {
     showError("errorBanner", t("library.action_error", { error: err.message }));
   }
@@ -1406,8 +2218,12 @@ async function init() {
   // match, not re-applies it (avoids a redundant DOM write, not a flash risk).
   applyTheme(localStorage.getItem("simslink-theme") || "dark");
   applyTileSize(localStorage.getItem("simslink-tile-size") || "large");
+  applyViewMode(localStorage.getItem("simslink-view-mode") || "grid");
+  applySimplifiedNames(localStorage.getItem("simslink-simplified-names") !== "0");
   wireSearch();
   wireNav();
+  wireViewToggle();
+  wireSimplifiedNamesToggle();
   document.getElementById("confirmCancelBtn").addEventListener("click", closeConfirm);
   document.getElementById("confirmOverlay").addEventListener("click", (e) => {
     if (e.target.id === "confirmOverlay") closeConfirm();

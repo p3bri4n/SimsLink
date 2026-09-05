@@ -34,6 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import blacklist as blacklist_module
+from . import broken_mods
 from . import cache_cleaner
 from . import conflict_detector
 from . import crash_analyzer
@@ -303,15 +304,89 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
     @app.get("/api/conflicts")
     def list_conflicts(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
         # Purely informational (see conflict_detector.py) — resolves mod_ids
-        # to {id, name} here so the frontend never has to look them up itself.
+        # to {id, name, author, active, install_date} here so the frontend
+        # never has to look them up itself. install_date/active/author are
+        # surfaced so the UI can show the facts relevant to "which one do I
+        # keep" without SimsLink guessing an answer itself (CLAUDE.md:
+        # suspicion isn't confirmation) — the user decides, we just save
+        # them a lookup. `author` specifically drives the frontend's
+        # "Duplicate" vs. neutral "Identical content" tag on an
+        # 'exact_duplicate_mod' pair: the mod with no known author is
+        # assumed the redundant one when the other side has a real author;
+        # when both (or neither) have one, neither side gets singled out —
+        # see app.js's duplicateTagModIds()/identicalContentTagModIds().
         results = []
         for group in conflict_detector.find_conflicts(conn):
             mods = []
             for mod_id in group.mod_ids:
-                row = conn.execute("SELECT name FROM mods WHERE id = ?", (mod_id,)).fetchone()
-                mods.append({"id": mod_id, "name": row["name"] if row is not None else mod_id})
-            results.append({"kind": group.kind, "identifier": group.identifier, "mods": mods})
+                row = conn.execute(
+                    "SELECT name, author, active, install_date FROM mods WHERE id = ?", (mod_id,)
+                ).fetchone()
+                mods.append(
+                    {
+                        "id": mod_id,
+                        "name": row["name"] if row is not None else mod_id,
+                        "author": row["author"] if row is not None else None,
+                        "active": bool(row["active"]) if row is not None else None,
+                        "install_date": row["install_date"] if row is not None else None,
+                    }
+                )
+            results.append(
+                {"kind": group.kind, "identifier": group.identifier, "mods": mods, "file_count": group.file_count}
+            )
         return results
+
+    @app.get("/api/mods/broken")
+    def list_broken_mods(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        # Purely informational (see broken_mods.py) — folders under Mods/
+        # with nothing the game would actually load, never auto-fixed.
+        return [
+            {
+                "name": folder.name,
+                "reason": folder.reason,
+                "file_count": folder.file_count,
+                "zip_names": folder.zip_names,
+                "sample_files": folder.sample_files,
+            }
+            for folder in broken_mods.scan_broken_mods(config, conn)
+        ]
+
+    @app.post("/api/mods/broken/{name}/fix")
+    def fix_broken_mod(name: str, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        # Only reachable from a confirm-modal-gated frontend action (see
+        # broken_mods.py) — never triggered automatically. Only 'empty' and
+        # 'unextracted_archive' (single archive) are fixable; anything else
+        # raises, translated to 400 below.
+        try:
+            mod_id = broken_mods.fix_broken_mod(name, config, conn)
+        except broken_mods.BrokenModFixError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"fixed": True, "mod_id": mod_id}
+
+    @app.delete("/api/mods/broken/{name}")
+    def delete_broken_folder_route(name: str) -> dict:
+        # Manual "just get rid of this" action, gated behind the same
+        # confirm-modal pattern as every other destructive action — never
+        # triggered automatically. Available for any reason, unlike the
+        # reason-specific fix/repair routes above.
+        try:
+            broken_mods.delete_broken_folder(name, config)
+        except broken_mods.BrokenModFixError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"deleted": name}
+
+    @app.post("/api/mods/broken/{name}/attempt-script-repair")
+    def attempt_script_repair_route(name: str, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+        # Best-effort only, deliberately separate from fix_broken_mod() above
+        # — re-zipping an extracted script folder can produce a mod that
+        # "installs" but still doesn't load in-game (see broken_mods.py).
+        # Only reachable from a confirm-modal-gated frontend action that
+        # explicitly warns about this, never triggered automatically.
+        try:
+            mod_id = broken_mods.attempt_script_repair(name, config, conn)
+        except broken_mods.BrokenModFixError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"repaired": True, "mod_id": mod_id}
 
     @app.get("/api/mods/{mod_id}")
     def get_mod(mod_id: str, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
@@ -805,15 +880,23 @@ def create_app(config: Config, *, db_path: Path | None = None) -> FastAPI:
 
     @app.get("/api/blacklist/matches")
     def blacklist_matches_route(conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+        # Only currently-active mods: a disabled mod's files aren't loaded by
+        # the game, so a blacklist match against it isn't a live concern —
+        # same reasoning as conflict_detector.py excluding disabled mods.
         entries = blacklist_module.list_entries(conn)
         if not entries:
             return []
         results = []
-        for row in conn.execute("SELECT id, name FROM mods ORDER BY name COLLATE NOCASE"):
+        for row in conn.execute("SELECT id, name FROM mods WHERE active = 1 ORDER BY name COLLATE NOCASE"):
             hits = blacklist_module.find_matches(row["name"], row["id"], entries)
             if hits:
                 results.append(
-                    {"mod_id": row["id"], "mod_name": row["name"], "patterns": [h.pattern for h in hits]}
+                    {
+                        "mod_id": row["id"],
+                        "mod_name": row["name"],
+                        "patterns": [h.pattern for h in hits],
+                        "pattern_ids": [h.id for h in hits],
+                    }
                 )
         return results
 

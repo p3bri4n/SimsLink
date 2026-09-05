@@ -1,9 +1,15 @@
 """SimsLink's desktop entry point. Starts the FastAPI app (backend/main.py)
-on a background thread, waits for it to come up, then opens it in a native
-window via pywebview — not a browser tab.
+on a background thread, waits for it to come up, then opens it in the
+system's default browser.
 
-Linux system deps for pywebview's GTK/WebKit backend: `python3-gi` +
-`gir1.2-webkit2-4.0` (see CLAUDE.md's "Tech stack").
+Temporarily browser-only instead of a pywebview native window: on this
+project's dev machine (GTK3 WebKit2GTK under a native Wayland session),
+real mouse clicks silently failed to reach the page (page rendered, keyboard
+input worked, but click events never fired) — reproduced under both the
+native Wayland backend and GDK_BACKEND=x11 (XWayland), so not a simple
+backend-selection fix. Revisit pywebview once that's root-caused; nothing
+about the backend (FastAPI routes, frontend JS) depends on which shell
+serves it. See CLAUDE.md's "Current project status" for more detail.
 """
 
 from __future__ import annotations
@@ -11,9 +17,9 @@ from __future__ import annotations
 import sys
 import threading
 import time
+import webbrowser
 
 import uvicorn
-import webview
 from fastapi import FastAPI
 
 from backend.config import Config, ConfigError
@@ -59,9 +65,15 @@ def main() -> None:
     if config.mods_watcher_enabled:
         app.state.mods_watcher.start()
     threading.Thread(target=app.state.run_startup_scan, daemon=True).start()
+
+    url = f"http://{HOST}:{PORT}/"
+    webbrowser.open(url)
+    print(f"SimsLink is running at {url} — press Ctrl+C to stop.")
     try:
-        webview.create_window("SimsLink", f"http://{HOST}:{PORT}/", width=1280, height=800, min_size=(960, 600))
-        webview.start()
+        while not server.should_exit:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
     finally:
         app.state.download_watcher.stop()
         if config.mods_watcher_enabled:

@@ -142,6 +142,21 @@ def test_install_generates_unique_mod_id_on_name_collision(app_config, conn, tmp
     assert id1 != id2
 
 
+def test_regression_install_avoids_orphaned_library_folder_not_in_db(app_config, conn, tmp_path):
+    # A library folder can outlive its DB row (e.g. the DB was reset/restored
+    # separately from LIBRARY_DIR's contents). generate_unique_mod_id used to
+    # only check the DB, so this orphaned folder wasn't seen as a collision,
+    # and _finalize_install's plain mkdir(parents=True) raised an unhandled
+    # FileExistsError instead of picking a fresh id.
+    (app_config.library_dir / "mymod").mkdir()
+    archive = make_zip(tmp_path, "source.zip", {"mymod.package": b"data"})
+
+    mod_id = mod_manager.install(archive, config=app_config, conn=conn, mod_name="mymod")
+
+    assert mod_id != "mymod"
+    assert (app_config.library_dir / mod_id / "mymod.package").is_file()
+
+
 def test_install_uses_symlink_when_supported(app_config, conn, tmp_path):
     archive = make_zip(tmp_path, "source.zip", {"mymod.package": b"data"})
 

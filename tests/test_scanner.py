@@ -121,6 +121,25 @@ def test_import_untracked_mods_ignores_loose_files_at_mods_root(app_config, conn
     assert imported == []
 
 
+def test_regression_unimportable_folder_does_not_abort_rest_of_scan(app_config, conn):
+    # A folder under Mods/ with no .package/.ts4script anywhere in it (e.g.
+    # an extracted .ts4script left as loose .pyc files) used to raise
+    # ModManagerError uncaught, aborting the whole scan and leaving every
+    # later entry (sorted alphabetically after it) unimported.
+    unimportable = app_config.sims4_mods_dir / "AAA_ExtractedScript"
+    unimportable.mkdir()
+    (unimportable / "some_module.pyc").write_bytes(b"not tracked")
+
+    importable = app_config.sims4_mods_dir / "ZZZ_RealMod"
+    importable.mkdir()
+    (importable / "real.package").write_bytes(b"data")
+
+    imported = scanner.import_untracked_mods(app_config, conn)
+
+    assert len(imported) == 1
+    assert unimportable.is_dir() and not unimportable.is_symlink()
+
+
 # --- real-time watcher ---------------------------------------------------
 
 

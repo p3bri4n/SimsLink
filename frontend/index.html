@@ -46,40 +46,58 @@
 
   <div class="main">
     <section id="view-library" class="view">
-      <div class="main-head">
-        <div>
-          <h1 data-i18n="library.title">Library</h1>
-          <div class="sub" id="subtitle"></div>
+      <div class="sticky-head">
+        <div class="main-head">
+          <div>
+            <h1 data-i18n="library.title">Library</h1>
+            <div class="sub" id="subtitle"></div>
+          </div>
+          <div class="head-controls">
+            <label class="simplified-names-toggle" for="simplifiedNamesCheckbox">
+              <input type="checkbox" id="simplifiedNamesCheckbox" checked>
+              <span data-i18n="library.simplified_names_toggle">Simplified names</span>
+            </label>
+            <div class="view-toggle" id="viewToggle">
+              <button class="view-toggle-btn" data-view-mode="grid" data-i18n-title="library.view_toggle.grid" title="Grid view">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              </button>
+              <button class="view-toggle-btn" data-view-mode="list" data-i18n-title="library.view_toggle.list" title="List view">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div class="error-banner" id="errorBanner"></div>
+        <div class="error-banner" id="errorBanner"></div>
 
-      <!-- Game-wide, not mod-specific — shown whenever /api/status confirms
-           the game's options.ini has Script Mods Allowed turned off. Always
-           expanded (one line), unlike the conflicts list below. -->
-      <div class="warning-banner" id="scriptModsWarning" hidden data-i18n="library.script_mods_warning">Script Mods Allowed is off in the game's options — .ts4script mods won't load.</div>
+        <!-- Game-wide, not mod-specific — shown whenever /api/status confirms
+             the game's options.ini has Script Mods Allowed turned off. Always
+             expanded (one line), unlike the conflicts list below. -->
+        <div class="warning-banner" id="scriptModsWarning" hidden data-i18n="library.script_mods_warning">Script Mods Allowed is off in the game's options — .ts4script mods won't load.</div>
 
-      <!-- Informational only — never blocks anything. Combines
-           conflict_detector.py's file-level conflicts and blacklist.py's
-           pattern matches; hidden entirely when both come back empty. -->
-      <div class="conflicts-banner" id="conflictsBanner" hidden>
-        <button class="conflicts-toggle" id="conflictsToggle" type="button"></button>
-        <div class="conflicts-list" id="conflictsList" hidden></div>
+        <!-- Informational only — never blocks anything. Combines
+             conflict_detector.py's file-level conflicts and blacklist.py's
+             pattern matches; hidden entirely when both come back empty. -->
+        <div class="conflicts-banner" id="conflictsBanner" hidden>
+          <button class="conflicts-toggle" id="conflictsToggle" type="button"></button>
+          <div class="conflicts-list" id="conflictsList" hidden></div>
+        </div>
       </div>
 
       <div class="grid" id="grid"></div>
     </section>
 
     <section id="view-catalog" class="view" hidden>
-      <div class="main-head">
-        <div>
-          <h1 data-i18n="catalog.title">Catalog</h1>
-          <div class="sub" data-i18n="catalog.subtitle">Browse and install mods from CurseForge.</div>
+      <div class="sticky-head">
+        <div class="main-head">
+          <div>
+            <h1 data-i18n="catalog.title">Catalog</h1>
+            <div class="sub" data-i18n="catalog.subtitle">Browse and install mods from CurseForge.</div>
+          </div>
         </div>
-      </div>
 
-      <div class="error-banner" id="catalogErrorBanner"></div>
+        <div class="error-banner" id="catalogErrorBanner"></div>
+      </div>
 
       <!-- Exactly one of these two is shown, based on /api/status's
            direct_mode — Catalog needs zero API access to render, but has
@@ -98,14 +116,16 @@
     </section>
 
     <section id="view-updates" class="view" hidden>
-      <div class="main-head">
-        <div>
-          <h1 data-i18n="updates.title">Updates</h1>
-          <div class="sub" data-i18n="updates.subtitle">Check for and apply mod updates.</div>
+      <div class="sticky-head">
+        <div class="main-head">
+          <div>
+            <h1 data-i18n="updates.title">Updates</h1>
+            <div class="sub" data-i18n="updates.subtitle">Check for and apply mod updates.</div>
+          </div>
         </div>
-      </div>
 
-      <div class="error-banner" id="updatesErrorBanner"></div>
+        <div class="error-banner" id="updatesErrorBanner"></div>
+      </div>
 
       <!-- Assisted Mode: manual checklist of CurseForge links. Direct Mode:
            on-demand "Check for updates" against the latest CurseForge file
@@ -122,25 +142,29 @@
     </section>
 
     <section id="view-crash" class="view" hidden>
-      <div class="main-head">
-        <div>
-          <h1 data-i18n="crash.title">Crash Mode</h1>
-          <div class="sub" data-i18n="crash.subtitle">Diagnose the last crash and clean up stale cache.</div>
+      <div class="sticky-head">
+        <div class="main-head">
+          <div>
+            <h1 data-i18n="crash.title">Crash Mode</h1>
+            <div class="sub" data-i18n="crash.subtitle">Diagnose the last crash and clean up stale cache.</div>
+          </div>
+          <div class="actions">
+            <button class="btn" id="crashClearCacheButton" data-i18n="crash.clear_cache_button">Clear cache</button>
+            <button class="btn primary" id="crashAnalyzeButton" data-i18n="crash.analyze_button">I crashed</button>
+          </div>
         </div>
-        <div class="actions">
-          <button class="btn" id="crashClearCacheButton" data-i18n="crash.clear_cache_button">Clear cache</button>
-          <button class="btn primary" id="crashAnalyzeButton" data-i18n="crash.analyze_button">I crashed</button>
-        </div>
-      </div>
 
-      <div class="error-banner" id="crashErrorBanner"></div>
+        <div class="error-banner" id="crashErrorBanner"></div>
+      </div>
 
       <div id="crashStatus"></div>
     </section>
 
     <section id="view-settings" class="view" hidden>
-      <div class="main-head">
-        <div><h1 data-i18n="settings.title">Settings</h1></div>
+      <div class="sticky-head">
+        <div class="main-head">
+          <div><h1 data-i18n="settings.title">Settings</h1></div>
+        </div>
       </div>
 
       <div class="detail-section">
@@ -238,6 +262,11 @@
       <span class="pill" id="dType">—</span>
     </div>
     <div class="detail-desc" id="dDesc">—</div>
+
+    <div class="detail-section" id="dConflictsSection" hidden>
+      <h4 data-i18n="library.detail.conflicts_heading">Conflicts &amp; warnings</h4>
+      <div id="dConflicts"></div>
+    </div>
 
     <div class="detail-section">
       <h4 data-i18n="library.detail.dependencies_heading">Dependencies</h4>

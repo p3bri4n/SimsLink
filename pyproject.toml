@@ -16,6 +16,7 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "pywebview>=5.0",
+    "pefile>=2024.8",
 ]
 
 [project.optional-dependencies]

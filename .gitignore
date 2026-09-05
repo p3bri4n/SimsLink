@@ -1,3 +1,8 @@
+# SimsLink's LIBRARY_DIR when it resolves inside the project (dev setups) —
+# this is the user's actual mod library (real, third-party .package/
+# .ts4script files), never source, never something to commit.
+/library/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

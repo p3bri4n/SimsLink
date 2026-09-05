@@ -3,6 +3,7 @@ mods that were placed directly under Mods/ before SimsLink managed them."""
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from watchdog.observers import Observer
 
 from . import mod_manager
 from .config import Config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -165,7 +168,15 @@ def import_untracked_mods(config: Config, conn: sqlite3.Connection) -> list[str]
             continue
         if entry.name in known_ids:
             continue
-        mod_id = mod_manager.import_existing_folder(entry, config=config, conn=conn)
+        try:
+            mod_id = mod_manager.import_existing_folder(entry, config=config, conn=conn)
+        except mod_manager.ModManagerError:
+            # A folder under Mods/ that isn't importable (e.g. no
+            # .package/.ts4script anywhere in it — an extracted .ts4script
+            # left as loose .pyc files, a readme-only folder, ...) shouldn't
+            # abort the whole scan and leave every later entry unimported.
+            logger.warning("Skipping unimportable folder under Mods/: %s", entry, exc_info=True)
+            continue
         imported.append(mod_id)
 
     return imported

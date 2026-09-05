@@ -82,11 +82,20 @@ def slugify(text: str) -> str:
     return _SLUG_RE.sub("-", text.lower()).strip("-") or "mod"
 
 
-def generate_unique_mod_id(hint: str, conn: sqlite3.Connection) -> str:
+def generate_unique_mod_id(hint: str, conn: sqlite3.Connection, config: Config) -> str:
+    """Picks a mod id unused both in the DB and on disk under LIBRARY_DIR.
+
+    A DB-only check isn't enough: a library folder can outlive its DB row
+    (e.g. the DB was reset/restored separately from LIBRARY_DIR's contents),
+    in which case `_finalize_install`'s plain `mkdir(parents=True)` would
+    hit an unhandled FileExistsError instead of picking a fresh id.
+    """
     base = slugify(hint)
     candidate = base
     suffix = 2
-    while conn.execute("SELECT 1 FROM mods WHERE id = ?", (candidate,)).fetchone():
+    while conn.execute(
+        "SELECT 1 FROM mods WHERE id = ?", (candidate,)
+    ).fetchone() or (config.library_dir / candidate).exists():
         candidate = f"{base}-{suffix}"
         suffix += 1
     return candidate
@@ -241,7 +250,7 @@ def install(
         if not files:
             raise ModManagerError(f"No .package or .ts4script files found in {source}")
         name = mod_name or source.stem
-        mod_id = generate_unique_mod_id(mod_name or source.stem, conn)
+        mod_id = generate_unique_mod_id(mod_name or source.stem, conn, config)
         return _finalize_install(mod_id, staged_dir, files, name, config, conn, metadata=metadata)
 
 
@@ -251,7 +260,7 @@ def import_existing_folder(source_dir: Path, *, config: Config, conn: sqlite3.Co
     files = walk_mod_files(source_dir)
     if not files:
         raise ModManagerError(f"No .package or .ts4script files found in {source_dir}")
-    mod_id = generate_unique_mod_id(source_dir.name, conn)
+    mod_id = generate_unique_mod_id(source_dir.name, conn, config)
     return _finalize_install(
         mod_id,
         source_dir,

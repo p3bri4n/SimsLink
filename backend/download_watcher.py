@@ -18,10 +18,8 @@ see backend/main.py's get_conn()).
 from __future__ import annotations
 
 import difflib
-import shutil
 import sqlite3
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -29,6 +27,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from . import mod_manager
+from .backups import backup_folder
 from .config import Config
 
 _WATCHED_EXTENSIONS = {".zip", ".package", ".ts4script"}
@@ -56,29 +55,6 @@ def match_existing_mod(path: Path, conn: sqlite3.Connection) -> tuple[str | None
     return row["id"], row["name"]
 
 
-def _backup_library_folder(library_path: Path, config: Config) -> None:
-    if not library_path.exists():
-        return
-    backups_dir = config.library_dir / ".backups"
-    backups_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    shutil.copytree(library_path, backups_dir / f"{library_path.name}-{timestamp}")
-    _purge_old_backups(backups_dir, library_path.name, config.backup_retention_count)
-
-
-def _purge_old_backups(backups_dir: Path, mod_id: str, keep: int) -> None:
-    """Keeps only the `keep` most recent backups for `mod_id`; every replace
-    creates one more, and nothing was purging the rest before this — left
-    unbounded, .backups/ grows forever (CLAUDE.md's Settings §6.8 gap)."""
-    # Backup dirs are named "<mod_id>-<UTC timestamp>"; the timestamp format
-    # (%Y%m%dT%H%M%SZ) sorts lexicographically in chronological order, so a
-    # plain name sort finds the oldest ones without parsing anything.
-    existing = sorted(d for d in backups_dir.glob(f"{mod_id}-*") if d.is_dir())
-    to_delete = existing[:-keep] if keep > 0 else existing
-    for old in to_delete:
-        shutil.rmtree(old)
-
-
 def confirm_install(
     path: Path, *, config: Config, conn: sqlite3.Connection, mod_name: str | None = None
 ) -> str:
@@ -104,7 +80,7 @@ def confirm_replace(
     if old_row is None:
         raise DownloadWatcherError(f"No such mod: {mod_id}")
 
-    _backup_library_folder(Path(old_row["library_path"]), config)
+    backup_folder(Path(old_row["library_path"]), mod_id, config)
     mod_manager.delete(mod_id, config=config, conn=conn)
     return mod_manager.install(
         path, config=config, conn=conn, mod_name=old_row["name"], metadata=metadata or mod_manager.ModMetadata()

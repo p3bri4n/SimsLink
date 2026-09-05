@@ -109,7 +109,15 @@ def test_conflicts_empty_when_no_duplicates(app_config, conn, tmp_path, client):
 
 def test_conflicts_reports_package_duplicate_with_resolved_names(app_config, conn, tmp_path, client):
     _install_mod(app_config, conn, tmp_path, "Mod A", filename="shared.package", content=b"same-bytes")
-    _install_mod(app_config, conn, tmp_path, "Mod B", filename="shared.package", content=b"same-bytes")
+    # Mod B also has a file of its own, so its full file set doesn't happen
+    # to exactly match Mod A's — that's exact_duplicate_mod's signal
+    # (tested separately below), this test is about the plain
+    # single-shared-file duplicate_package case.
+    archive = tmp_path / "Mod B.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("shared.package", b"same-bytes")
+        zf.writestr("extra.package", b"only-in-b")
+    mod_manager.install(archive, config=app_config, conn=conn, mod_name="Mod B")
 
     response = client.get("/api/conflicts")
 
@@ -117,6 +125,26 @@ def test_conflicts_reports_package_duplicate_with_resolved_names(app_config, con
     body = response.json()
     assert len(body) == 1
     assert body[0]["kind"] == "duplicate_package"
+    assert body[0]["file_count"] == 1
+    names = sorted(m["name"] for m in body[0]["mods"])
+    assert names == ["Mod A", "Mod B"]
+    for m in body[0]["mods"]:
+        assert m["active"] is True
+        assert m["install_date"]
+        assert "author" in m
+
+
+def test_conflicts_reports_exact_duplicate_mod(app_config, conn, tmp_path, client):
+    _install_mod(app_config, conn, tmp_path, "Mod A", filename="shared.package", content=b"same-bytes")
+    _install_mod(app_config, conn, tmp_path, "Mod B", filename="shared.package", content=b"same-bytes")
+
+    response = client.get("/api/conflicts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["kind"] == "exact_duplicate_mod"
+    assert body[0]["file_count"] == 1
     names = sorted(m["name"] for m in body[0]["mods"])
     assert names == ["Mod A", "Mod B"]
 
@@ -132,6 +160,114 @@ def test_conflicts_reports_ts4script_name_collision(app_config, conn, tmp_path, 
     assert len(body) == 1
     assert body[0]["kind"] == "ts4script_name_collision"
     assert body[0]["identifier"] == "core.ts4script"
+
+
+# --- /api/mods/broken -------------------------------------------------------------
+
+
+def test_broken_mods_empty_when_nothing_unmanaged(app_config, conn, tmp_path, client):
+    _install_mod(app_config, conn, tmp_path, "Solo Mod")
+
+    response = client.get("/api/mods/broken")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_broken_mods_reports_classified_folders(app_config, client):
+    (app_config.sims4_mods_dir / "ExtractedScript" / "pkg").mkdir(parents=True)
+    (app_config.sims4_mods_dir / "ExtractedScript" / "pkg" / "main.pyc").write_bytes(b"x")
+
+    response = client.get("/api/mods/broken")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0] == {
+        "name": "ExtractedScript",
+        "reason": "unpacked_script",
+        "file_count": 1,
+        "zip_names": [],
+        "sample_files": ["pkg/main.pyc"],
+    }
+
+
+def test_fix_broken_mod_empty_folder(app_config, client):
+    (app_config.sims4_mods_dir / "OptionalAddons").mkdir()
+
+    response = client.post("/api/mods/broken/OptionalAddons/fix")
+
+    assert response.status_code == 200
+    assert response.json() == {"fixed": True, "mod_id": None}
+    assert not (app_config.sims4_mods_dir / "OptionalAddons").exists()
+
+
+def test_fix_broken_mod_unextracted_archive(app_config, client):
+    folder = app_config.sims4_mods_dir / "SomeMod"
+    folder.mkdir()
+    with zipfile.ZipFile(folder / "SomeMod.zip", "w") as zf:
+        zf.writestr("mymod.package", b"data")
+
+    response = client.post("/api/mods/broken/SomeMod/fix")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fixed"] is True
+    assert body["mod_id"]
+    assert not folder.exists()
+
+
+def test_fix_broken_mod_unsupported_reason_returns_400(app_config, client):
+    folder = app_config.sims4_mods_dir / "Leftovers"
+    folder.mkdir()
+    (folder / "notes.log").write_bytes(b"log")
+
+    response = client.post("/api/mods/broken/Leftovers/fix")
+
+    assert response.status_code == 400
+    assert folder.exists()
+
+
+def test_attempt_script_repair_installs_new_mod(app_config, client):
+    folder = app_config.sims4_mods_dir / "ExtractedScript"
+    folder.mkdir()
+    (folder / "main.pyc").write_bytes(b"compiled")
+
+    response = client.post("/api/mods/broken/ExtractedScript/attempt-script-repair")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["repaired"] is True
+    assert body["mod_id"]
+    assert not folder.exists()
+
+
+def test_attempt_script_repair_wrong_reason_returns_400(app_config, client):
+    folder = app_config.sims4_mods_dir / "OptionalAddons"
+    folder.mkdir()
+
+    response = client.post("/api/mods/broken/OptionalAddons/attempt-script-repair")
+
+    assert response.status_code == 400
+    assert folder.exists()
+
+
+def test_delete_broken_folder_removes_it(app_config, client):
+    folder = app_config.sims4_mods_dir / "ExtractedScript"
+    folder.mkdir()
+    (folder / "main.pyc").write_bytes(b"compiled")
+
+    response = client.delete("/api/mods/broken/ExtractedScript")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": "ExtractedScript"}
+    assert not folder.exists()
+
+
+def test_delete_broken_folder_unknown_returns_400(client):
+    response = client.delete("/api/mods/broken/DoesNotExist")
+
+    assert response.status_code == 400
 
 
 # --- /api/mods/{id} (detail) -----------------------------------------------------
@@ -1010,6 +1146,17 @@ def test_blacklist_matches_flags_installed_mod(app_config, conn, tmp_path, clien
     assert len(body) == 1
     assert body[0]["mod_id"] == mod_id
     assert body[0]["patterns"] == ["badmod"]
+    assert len(body[0]["pattern_ids"]) == 1
+
+
+def test_regression_disabled_mod_excluded_from_blacklist_matches(app_config, conn, tmp_path, client):
+    mod_id = _install_mod(app_config, conn, tmp_path, "Totally BadMod Deluxe")
+    client.post("/api/blacklist", json={"pattern": "badmod"})
+    client.post(f"/api/mods/{mod_id}/disable")
+
+    response = client.get("/api/blacklist/matches")
+
+    assert response.json() == []
 
 
 def test_blacklist_matches_empty_when_no_entries(app_config, conn, tmp_path, client):

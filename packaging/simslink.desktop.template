@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SimsLink
+Comment=Mod manager for The Sims 4
+Exec=__REPO_DIR__/packaging/simslink-launcher.sh
+Icon=__REPO_DIR__/assets/simslink-icon.png
+Terminal=false
+Categories=Utility;

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from backend import backups as backups_module
 from backend import download_watcher
 from backend import mod_manager
 
@@ -154,7 +155,7 @@ class _FakeClock:
 
 
 def test_confirm_replace_purges_backups_beyond_retention_count(app_config, conn, tmp_path, monkeypatch):
-    monkeypatch.setattr(download_watcher, "datetime", _FakeClock)
+    monkeypatch.setattr(backups_module, "datetime", _FakeClock)
     limited_config = dataclasses.replace(app_config, backup_retention_count=2)
     mod_id = _install_mod(limited_config, conn, tmp_path, name="Cool Mod", filename="v1.package")
 
@@ -171,7 +172,7 @@ def test_confirm_replace_purges_backups_beyond_retention_count(app_config, conn,
 
 
 def test_confirm_replace_purge_is_scoped_per_mod(app_config, conn, tmp_path, monkeypatch):
-    monkeypatch.setattr(download_watcher, "datetime", _FakeClock)
+    monkeypatch.setattr(backups_module, "datetime", _FakeClock)
     limited_config = dataclasses.replace(app_config, backup_retention_count=1)
     mod_a = _install_mod(limited_config, conn, tmp_path, name="Mod A", filename="a1.package")
     mod_b = _install_mod(limited_config, conn, tmp_path, name="Mod B", filename="b1.package")

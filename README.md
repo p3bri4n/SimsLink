@@ -52,7 +52,7 @@ CurseForge's API requires a key, and that key is personal — it can't ship embe
 ## Tech stack
 
 - **Backend**: Python, FastAPI, SQLite
-- **Frontend**: HTML/CSS/JS, served locally and displayed in a native window via [pywebview](https://pywebview.flowrl.com/)
+- **Frontend**: HTML/CSS/JS, served locally. The desktop shell currently opens it in your default browser rather than a native [pywebview](https://pywebview.flowrl.com/) window — a pywebview click-forwarding bug on some Linux/WebKitGTK setups is still being tracked down; nothing about the app itself depends on which shell serves it.
 - **Filesystem watching**: `watchdog`
 
 ## Getting started
@@ -69,6 +69,8 @@ simslink        # or: python desktop.py
 ```
 
 Requires WebKitGTK for the desktop window (`python3-gi` + `gir1.2-webkit2-4.0` on Debian/Ubuntu-based distros).
+
+**Desktop icon.** Run `./packaging/install-launcher.sh` once to add a "SimsLink" entry to your applications menu, so future launches are a double-click instead of a terminal command. It generates a `.desktop` file pointing back at this clone (see `packaging/`), so re-run it if you move the repo.
 
 ```bash
 pytest
